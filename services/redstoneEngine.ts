@@ -1,3 +1,4 @@
+
 import { GridData, TileType, Direction, TileState, AppSettings } from '../types';
 
 export const getNeighbors = (x: number, y: number) => [
@@ -35,7 +36,8 @@ const isSolid = (type: TileType): boolean => {
     TileType.LAMP, TileType.NOTE_BLOCK, TileType.OBSERVER,
     TileType.REDSTONE_BLOCK, TileType.TNT, TileType.TARGET,
     TileType.OBSIDIAN, TileType.DISPENSER, TileType.DAYLIGHT_SENSOR,
-    TileType.SCULK_SENSOR, TileType.ANTENNA, TileType.RECEIVER
+    TileType.SCULK_SENSOR, TileType.ANTENNA, TileType.RECEIVER,
+    TileType.COUNTER
   ].includes(type);
 };
 
@@ -144,7 +146,7 @@ const getPushGroup = (grid: GridData, startX: number, startY: number, pushDir: D
   return Array.from(group);
 };
 
-export const updateRedstone = (grid: GridData, settings?: AppSettings): GridData => {
+export const updateRedstone = (grid: GridData, settings: AppSettings): GridData => {
   let nextGrid: GridData = {};
   const keys = Object.keys(grid);
 
@@ -173,8 +175,36 @@ export const updateRedstone = (grid: GridData, settings?: AppSettings): GridData
       newPower = channelOn ? 15 : 0;
       newActive = channelOn;
     } else if (tile.type === TileType.DAYLIGHT_SENSOR) {
-      newPower = 15; // Always active for simplicity
+      // Daylight sensor cycle: settings.dayTime is 0 to 2400
+      // 0-1200 is day, 1200-2400 is night. Peak at 600 or 1800.
+      const time = settings.dayTime;
+      const isNightMode = tile.isInverted;
+      let lightValue = 0;
+      
+      // Calculate a value 0-15 based on a sine curve
+      if (time < 1200) { // Day
+        lightValue = Math.max(0, Math.floor(15 * Math.sin(Math.PI * time / 1200)));
+      } else { // Night
+        lightValue = 0;
+      }
+
+      if (isNightMode) {
+          // Night mode logic: it peaks at night (roughly inverted)
+          let nightLightValue = 0;
+          if (time >= 1200) {
+              nightLightValue = Math.max(0, Math.floor(15 * Math.sin(Math.PI * (time - 1200) / 1200)));
+          }
+          newPower = nightLightValue;
+      } else {
+          newPower = lightValue;
+      }
+      newActive = newPower > 0;
+    } else if (tile.type === TileType.COUNTER) {
+      const currentVal = tile.internalCounter ?? 0;
+      const nextVal = (currentVal % 15) + 1;
+      newPower = nextVal;
       newActive = true;
+      extraState = { internalCounter: nextVal };
     } else if (tile.type === TileType.REDSTONE_BLOCK) {
       newPower = 15;
     } else if (tile.type === TileType.SCULK_SENSOR) {
@@ -325,7 +355,7 @@ export const updateRedstone = (grid: GridData, settings?: AppSettings): GridData
 
   Object.keys(nextGrid).forEach(key => {
     const tile = nextGrid[key];
-    if (tile.power > 0 && [TileType.LEVER, TileType.BUTTON, TileType.TORCH, TileType.REPEATER, TileType.COMPARATOR, TileType.OBSERVER, TileType.REDSTONE_BLOCK, TileType.TARGET, TileType.DAYLIGHT_SENSOR, TileType.PRESSURE_PLATE, TileType.SCULK_SENSOR, TileType.RECEIVER].includes(tile.type)) {
+    if (tile.power > 0 && [TileType.LEVER, TileType.BUTTON, TileType.TORCH, TileType.REPEATER, TileType.COMPARATOR, TileType.OBSERVER, TileType.REDSTONE_BLOCK, TileType.TARGET, TileType.DAYLIGHT_SENSOR, TileType.PRESSURE_PLATE, TileType.SCULK_SENSOR, TileType.RECEIVER, TileType.COUNTER].includes(tile.type)) {
       powerMap[key] = tile.power;
       queue.push({ key, power: tile.power });
     }

@@ -29,7 +29,8 @@ export enum TileType {
   PRESSURE_PLATE = 'PRESSURE_PLATE',
   SCULK_SENSOR = 'SCULK_SENSOR',
   ANTENNA = 'ANTENNA',
-  RECEIVER = 'RECEIVER'
+  RECEIVER = 'RECEIVER',
+  COUNTER = 'COUNTER'
 }
 
 export interface AppSettings {
@@ -37,6 +38,7 @@ export interface AppSettings {
   backgroundColor: string;
   showGrid: boolean;
   simulationSpeed: number;
+  dayTime: number; // 0 to 2400
 }
 
 export interface TileState {
@@ -54,6 +56,8 @@ export interface TileState {
   comparatorMode?: 'COMPARE' | 'SUBTRACT';
   contents?: TileType; // For Dispenser
   lastActive?: boolean; // Rising edge detection for Dispenser
+  isInverted?: boolean; // For Daylight Sensor Night Mode
+  internalCounter?: number; // For Counter block 1-15
   // Cache for Observer logic
   observedType?: TileType;
   observedPower?: number;

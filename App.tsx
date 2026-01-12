@@ -61,7 +61,8 @@ const App: React.FC = () => {
     tntDestructive: true,
     backgroundColor: '#0a0a0a',
     showGrid: true,
-    simulationSpeed: 100
+    simulationSpeed: 100,
+    dayTime: 600 // Start at peak day
   });
 
   const lastNoteBlockSignals = useRef<Record<string, boolean>>({});
@@ -74,6 +75,24 @@ const App: React.FC = () => {
 
   const handleRotateGlobal = () => {
     setDirection(prev => getRotatedDirection(prev));
+  };
+
+  // Interpolate between day and night colors based on dayTime (0-2400)
+  const getDynamicBackground = () => {
+    const time = settings.dayTime;
+    let r, g, b;
+    if (time < 1200) { // Day transition
+      const factor = Math.sin(Math.PI * time / 1200);
+      r = 10 + Math.floor(60 * factor);
+      g = 10 + Math.floor(100 * factor);
+      b = 10 + Math.floor(160 * factor);
+    } else { // Night transition
+      const factor = Math.sin(Math.PI * (time - 1200) / 1200);
+      r = 10 + Math.floor(10 * factor);
+      g = 10 + Math.floor(20 * factor);
+      b = 10 + Math.floor(50 * factor);
+    }
+    return `rgb(${r}, ${g}, ${b})`;
   };
 
   useEffect(() => {
@@ -101,8 +120,16 @@ const App: React.FC = () => {
   useEffect(() => {
     if (isPaused) return;
     const interval = setInterval(() => {
+      setSettings(prev => ({
+        ...prev,
+        dayTime: (prev.dayTime + 1) % 2400
+      }));
+
       setGrid(prev => {
-        const next = updateRedstone(prev, settings);
+        const next = updateRedstone(prev, {
+            ...settings,
+            dayTime: (settings.dayTime + 1) % 2400
+        });
         Object.keys(next).forEach(key => {
           const tile = next[key];
           if (tile.type === TileType.NOTE_BLOCK) {
@@ -144,7 +171,9 @@ const App: React.FC = () => {
         level: (selectedType === TileType.WATER || selectedType === TileType.LAVA) ? 7 : undefined,
         comparatorMode: selectedType === TileType.COMPARATOR ? 'COMPARE' : undefined,
         contents: selectedType === TileType.DISPENSER ? TileType.AIR : undefined,
-        channel: (selectedType === TileType.ANTENNA || selectedType === TileType.RECEIVER) ? 0 : undefined
+        channel: (selectedType === TileType.ANTENNA || selectedType === TileType.RECEIVER) ? 0 : undefined,
+        isInverted: false,
+        internalCounter: selectedType === TileType.COUNTER ? 1 : undefined
       }
     }));
   };
@@ -185,6 +214,9 @@ const App: React.FC = () => {
           return prev;
         });
       }, 1500);
+    } else if (existing.type === TileType.DAYLIGHT_SENSOR) {
+        playClick(true);
+        setGrid(prev => ({ ...prev, [key]: { ...existing, isInverted: !existing.isInverted } }));
     } else if (existing.type === TileType.TARGET || existing.type === TileType.SCULK_SENSOR) {
       playClick(true);
       setGrid(prev => ({ ...prev, [key]: { ...existing, active: true, tickCooldown: 8 } }));
@@ -277,6 +309,10 @@ const App: React.FC = () => {
     const key = `${x},${y}`;
     const tile = grid[key];
     if (tool === 'CURSOR') {
+      if (tile && tile.type === TileType.DAYLIGHT_SENSOR) {
+          interactTile(x, y);
+          return;
+      }
       if (tile && tile.type === TileType.REPEATER) {
         const newDelay = ((tile.delay || 1) % 4) + 1;
         playClick(true);
@@ -337,7 +373,14 @@ const App: React.FC = () => {
       case TileType.LAVA: parts.push(`Level: ${tile.level}`); break;
       case TileType.OBSIDIAN: parts.push(`Immovable, Blast Resistant`); break;
       case TileType.TNT: parts.push(tile.active ? `Ignited!` : `Armed`); break;
-      case TileType.DAYLIGHT_SENSOR: parts.push(`Simulated Day (Source)`); break;
+      case TileType.DAYLIGHT_SENSOR: 
+          parts.push(tile.isInverted ? `Night Mode` : `Day Mode`); 
+          parts.push(`Right-click to toggle`);
+          break;
+      case TileType.COUNTER:
+          parts.push(`Cycle: 1 to 15`);
+          parts.push(`Value: ${tile.internalCounter}`);
+          break;
       case TileType.PRESSURE_PLATE: parts.push(`Hover to activate`); break;
       case TileType.SCULK_SENSOR: parts.push(`Vibration detection`); break;
       case TileType.ANTENNA:
@@ -396,7 +439,22 @@ const App: React.FC = () => {
             case TileType.LAMP: bgColor = tile.active ? COLORS.LAMP_ON : COLORS.LAMP_OFF; break;
             case TileType.TARGET: bgColor = COLORS.TARGET; content = <div className="w-4 h-4 rounded-full border-2 border-red-600 flex items-center justify-center"><div className="w-1 h-1 bg-red-600 rounded-full" /></div>; break;
             case TileType.OBSIDIAN: bgColor = COLORS.OBSIDIAN; break;
-            case TileType.DAYLIGHT_SENSOR: bgColor = COLORS.DAYLIGHT; content = <div className="w-4 h-4 rounded border border-white/20 flex items-center justify-center"><div className="w-2 h-2 bg-yellow-400 rounded-full" /></div>; break;
+            case TileType.DAYLIGHT_SENSOR: 
+                bgColor = tile.isInverted ? COLORS.DAYLIGHT_NIGHT : COLORS.DAYLIGHT; 
+                content = (
+                    <div className="w-4 h-4 rounded border border-white/20 flex items-center justify-center relative">
+                        <div className={`w-2 h-2 ${tile.isInverted ? 'bg-indigo-300' : 'bg-yellow-400'} rounded-full`} />
+                        <span className="absolute -top-1 -right-1 text-[6px]">{tile.isInverted ? '🌙' : '☀️'}</span>
+                    </div>
+                ); break;
+            case TileType.COUNTER:
+                bgColor = COLORS.COUNTER;
+                content = (
+                    <div className="flex flex-col items-center justify-center">
+                        <span className="text-[12px] font-bold text-white">{tile.internalCounter}</span>
+                        <div className="w-4 h-0.5 bg-red-500 opacity-50" />
+                    </div>
+                ); break;
             case TileType.SCULK_SENSOR: bgColor = COLORS.SCULK; content = <div className="w-1 h-4 bg-teal-400 rounded-full animate-pulse" />; break;
             case TileType.PRESSURE_PLATE: content = <div className={`w-6 h-2 bg-stone-500 rounded-sm transition-transform ${tile.active ? 'scale-y-50 translate-y-1' : ''}`} />; break;
             case TileType.ANTENNA: 
@@ -507,7 +565,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden text-slate-200" style={{ backgroundColor: settings.backgroundColor }}>
+    <div className="flex h-screen w-screen overflow-hidden text-slate-200 transition-colors duration-1000" style={{ backgroundColor: getDynamicBackground() }}>
       {/* Sidebar */}
       <div className="w-80 bg-[#1a1a1a] border-r border-slate-800 flex flex-col p-4 z-20 shadow-2xl overflow-y-auto custom-scroll">
         <h1 className="text-2xl font-bold mb-6 text-red-500 flex items-center justify-between">
@@ -545,17 +603,24 @@ const App: React.FC = () => {
           )}
 
           <section>
+            <h3 className="text-xs uppercase font-bold tracking-widest text-slate-500 mb-3 flex justify-between"><span>Simulation Time</span></h3>
+            <div className="bg-black/40 p-3 rounded-lg border border-slate-800">
+               <div className="flex items-center justify-between text-[10px] font-bold uppercase mb-2">
+                  <span>{settings.dayTime < 1200 ? 'Daylight' : 'Nighttime'}</span>
+                  <span className="text-slate-500">{Math.floor(settings.dayTime / 100)}:00</span>
+               </div>
+               <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-indigo-500 transition-all duration-300" style={{ width: `${(settings.dayTime / 2400) * 100}%` }} />
+               </div>
+            </div>
+          </section>
+
+          <section>
             <h3 className="text-xs uppercase font-bold tracking-widest text-slate-500 mb-3 flex justify-between"><span>Rotation</span><button onClick={handleRotateGlobal} className="text-[10px] text-indigo-400 hover:text-indigo-300">↻ ROTATE</button></h3>
             <div className="flex justify-between gap-1">
               {(['N', 'E', 'S', 'W'] as Direction[]).map(d => (
                 <button key={d} onClick={() => setDirection(d)} className={`flex-1 py-1 rounded border text-xs font-bold ${direction === d ? 'bg-indigo-600 border-indigo-400' : 'bg-slate-800 border-slate-700 hover:bg-slate-700'}`}>{d === 'N' ? '↑' : d === 'E' ? '→' : d === 'S' ? '↓' : '←'}</button>
               ))}
-            </div>
-            <div className="mt-2 text-[9px] text-slate-500 bg-black/20 p-2 rounded border border-slate-800">
-               <div className="flex flex-col gap-1">
-                 <div><span className="text-amber-500 font-bold">Wireless:</span> Antenna/Receiver on same channel [0-9].</div>
-                 <div><span className="text-amber-500 font-bold">Fix:</span> Clicking channel now increments only once!</div>
-               </div>
             </div>
           </section>
 
@@ -600,7 +665,8 @@ const App: React.FC = () => {
         <div className="fixed bottom-6 right-6 bg-black/80 backdrop-blur-md px-4 py-2 rounded-full border border-slate-700 text-[10px] text-slate-400 flex gap-4 uppercase font-bold tracking-widest shadow-lg z-30">
           <div className="flex items-center gap-1"><span className={`w-2 h-2 rounded-full ${isPaused ? 'bg-amber-500' : 'bg-green-500 animate-pulse'}`} />{isPaused ? 'Paused' : 'Running'}</div>
           <div className="border-l border-slate-800 pl-4">Tool: {tool}</div>
-          <div className="border-l border-slate-800 pl-4">Wireless: Antenna & Receiver</div>
+          <div className="border-l border-slate-800 pl-4">Time: {settings.dayTime}</div>
+          <div className="border-l border-slate-800 pl-4">Daylight: {settings.dayTime < 1200 ? 'Day' : 'Night'}</div>
         </div>
 
         {/* Settings Menu Modal */}
@@ -620,20 +686,6 @@ const App: React.FC = () => {
                     <span>TNT Destroys Blocks</span>
                     <span className="text-[10px]">{settings.tntDestructive ? 'ON' : 'OFF'}</span>
                   </button>
-                </div>
-
-                <div>
-                  <label className="text-xs uppercase font-bold text-slate-500 block mb-2">Background Color</label>
-                  <div className="grid grid-cols-5 gap-2">
-                    {['#0a0a0a', '#1a1a1a', '#2d2d2d', '#000000', '#1a0d2b'].map(color => (
-                      <button
-                        key={color}
-                        onClick={() => setSettings(s => ({...s, backgroundColor: color}))}
-                        style={{ backgroundColor: color }}
-                        className={`w-full h-8 rounded border-2 transition-transform hover:scale-110 ${settings.backgroundColor === color ? 'border-red-500 scale-110' : 'border-slate-800'}`}
-                      />
-                    ))}
-                  </div>
                 </div>
 
                 <div>

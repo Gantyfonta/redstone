@@ -24,9 +24,11 @@ export const COLORS = {
   OBSIDIAN: '#1a0d2b',
   DISPENSER: '#4b5563',
   DAYLIGHT: '#3b82f6',
+  DAYLIGHT_NIGHT: '#1e3a8a',
   SCULK: '#064e3b',
   ANTENNA: '#6366f1',
-  RECEIVER: '#ec4899'
+  RECEIVER: '#ec4899',
+  COUNTER: '#334155'
 };
 
 export const ICONS: Record<string, React.ReactNode> = {
@@ -58,4 +60,5 @@ export const ICONS: Record<string, React.ReactNode> = {
   SCULK_SENSOR: <div className="w-4 h-4 bg-teal-900 border border-teal-500 flex items-center justify-center"><div className="w-1 h-3 bg-teal-400 animate-pulse" /></div>,
   ANTENNA: <div className="w-4 h-4 text-indigo-400">📡</div>,
   RECEIVER: <div className="w-4 h-4 text-pink-400">📟</div>,
+  COUNTER: <div className="w-4 h-4 bg-slate-700 border border-slate-500 flex items-center justify-center text-[10px] font-bold text-white">#</div>
 };
