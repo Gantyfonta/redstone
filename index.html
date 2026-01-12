@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Redstone Lab 2D</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+  <style>
+    body {
+      background-color: #0a0a0a;
+      color: #e2e8f0;
+      margin: 0;
+      font-family: 'VT323', monospace;
+      overflow: hidden;
+    }
+    .custom-scroll::-webkit-scrollbar {
+      width: 6px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: #1a1a1a;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: #333;
+      border-radius: 3px;
+    }
+    input[type=range] {
+      accent-color: #ef4444;
+    }
+  </style>
+<script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.35.0"
+  }
+}
+</script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="module">
+    import { h, render, useState, useEffect, useRef } from 'https://esm.sh/preact';
+    import { h as html } from 'https://esm.sh/preact/hooks';
+    import htm from 'https://esm.sh/htm';
+
+    const htag = htm.bind(h);
+
+    // --- Constants & Types ---
+    const GRID_SIZE = 24;
+    const TILE_SIZE = 40;
+    
+    const TileType = {
+      AIR: 'AIR', DUST: 'DUST', TORCH: 'TORCH', REPEATER: 'REPEATER',
+      LEVER: 'LEVER', BUTTON: 'BUTTON', LAMP: 'LAMP', BLOCK: 'BLOCK',
+      GLASS: 'GLASS', SLIME: 'SLIME', PISTON: 'PISTON', STICKY_PISTON: 'STICKY_PISTON',
+      PISTON_HEAD: 'PISTON_HEAD', OBSERVER: 'OBSERVER', NOTE_BLOCK: 'NOTE_BLOCK',
+      WATER: 'WATER', LAVA: 'LAVA', REDSTONE_BLOCK: 'REDSTONE_BLOCK',
+      COMPARATOR: 'COMPARATOR', TNT: 'TNT', TARGET: 'TARGET',
+      OBSIDIAN: 'OBSIDIAN', DISPENSER: 'DISPENSER', DAYLIGHT_SENSOR: 'DAYLIGHT_SENSOR',
+      PRESSURE_PLATE: 'PRESSURE_PLATE', SCULK_SENSOR: 'SCULK_SENSOR',
+      ANTENNA: 'ANTENNA', RECEIVER: 'RECEIVER'
+    };
+
+    const COLORS = {
+      REDSTONE_OFF: '#4a0404', REDSTONE_ON: '#ff0000', BLOCK: '#7a7a7a',
+      GLASS: 'rgba(165, 243, 252, 0.3)', SLIME: '#86efac', TORCH_ON: '#ff4d4d',
+      TORCH_OFF: '#2a0000', LAMP_ON: '#fff3ad', LAMP_OFF: '#2d2d2d',
+      BG: '#121212', GRID: '#242424', WATER: 'rgba(59, 130, 246, 0.7)',
+      LAVA: 'rgba(249, 115, 22, 0.9)', TNT: '#ef4444', TARGET: '#ffffff',
+      OBSIDIAN: '#1a0d2b', DISPENSER: '#4b5563', DAYLIGHT: '#3b82f6',
+      SCULK: '#064e3b', ANTENNA: '#6366f1', RECEIVER: '#ec4899'
+    };
+
+    const ICONS = {
+      AIR: htag`<div class="w-4 h-4 border border-dashed border-gray-600 rounded" />`,
+      DUST: htag`<div class="w-4 h-4 bg-red-700 rounded-full" />`,
+      TORCH: htag`<div class="w-2 h-4 bg-red-500 rounded-t-sm" />`,
+      REPEATER: htag`<div class="w-4 h-4 bg-gray-500 flex items-center justify-center text-[8px]">▶</div>`,
+      LEVER: htag`<div class="w-2 h-4 bg-stone-400 rotate-12" />`,
+      BUTTON: htag`<div class="w-2 h-2 bg-stone-600" />`,
+      LAMP: htag`<div class="w-4 h-4 bg-yellow-900 border border-yellow-700" />`,
+      BLOCK: htag`<div class="w-4 h-4 bg-gray-400 shadow-inner" />`,
+      GLASS: htag`<div class="w-4 h-4 border border-cyan-200/50 bg-cyan-100/10" />`,
+      SLIME: htag`<div class="w-4 h-4 bg-green-400 border border-green-600 shadow-sm" />`,
+      PISTON: htag`<div class="w-4 h-4 bg-stone-700 border-t-4 border-amber-900" />`,
+      STICKY_PISTON: htag`<div class="w-4 h-4 bg-stone-700 border-t-4 border-green-600" />`,
+      PISTON_HEAD: htag`<div class="w-4 h-1 bg-amber-800" />`,
+      OBSERVER: htag`<div class="w-4 h-4 bg-stone-800 flex flex-col items-center justify-center border-t border-red-500"><div class="w-2 h-2 bg-stone-400 rounded-sm" /></div>`,
+      NOTE_BLOCK: htag`<div class="w-4 h-4 bg-amber-950 border border-amber-700 flex items-center justify-center text-[8px] text-amber-500 font-bold">♫</div>`,
+      WATER: htag`<div class="w-4 h-4 bg-blue-500 rounded-sm shadow-[0_0_5px_rgba(59,130,246,0.5)]" />`,
+      LAVA: htag`<div class="w-4 h-4 bg-orange-600 rounded-sm shadow-[0_0_8px_rgba(234,88,12,0.8)]" />`,
+      REDSTONE_BLOCK: htag`<div class="w-4 h-4 bg-red-600 border border-red-900 shadow-[inset_0_0_5px_rgba(0,0,0,0.5)]" />`,
+      COMPARATOR: htag`<div class="w-4 h-4 bg-stone-400 flex items-center justify-center text-[8px] font-bold">C</div>`,
+      TNT: htag`<div class="w-4 h-4 bg-red-600 border border-white flex flex-col items-center justify-center text-[6px] font-black text-white">TNT</div>`,
+      TARGET: htag`<div class="w-4 h-4 bg-white rounded-full border-2 border-red-600 flex items-center justify-center"><div class="w-1 h-1 bg-red-600 rounded-full" /></div>`,
+      OBSIDIAN: htag`<div class="w-4 h-4 bg-[#1a0d2b] border border-[#2d1b4d] shadow-[inset_0_0_3px_rgba(255,255,255,0.1)]" />`,
+      DISPENSER: htag`<div class="w-4 h-4 bg-stone-600 border border-stone-800 flex items-center justify-center"><div class="w-2 h-2 bg-stone-900 rounded-full border border-stone-400" /></div>`,
+      DAYLIGHT_SENSOR: htag`<div class="w-4 h-4 bg-blue-400 border-2 border-slate-600 flex items-center justify-center"><div class="w-2 h-2 bg-yellow-300 rounded-full" /></div>`,
+      PRESSURE_PLATE: htag`<div class="w-4 h-2 bg-stone-400 border border-stone-600 rounded-sm" />`,
+      SCULK_SENSOR: htag`<div class="w-4 h-4 bg-teal-900 border border-teal-500 flex items-center justify-center"><div class="w-1 h-3 bg-teal-400 animate-pulse" /></div>`,
+      ANTENNA: htag`<div class="w-4 h-4 text-indigo-400">📡</div>`,
+      RECEIVER: htag`<div class="w-4 h-4 text-pink-400">📟</div>`,
+    };
+
+    // --- Redstone Engine Logic ---
+    const getNeighbors = (x, y) => [
+      { x, y: y - 1, dir: 'N' },
+      { x, y: y + 1, dir: 'S' },
+      { x: x - 1, y, dir: 'W' },
+      { x: x + 1, y, dir: 'E' },
+    ];
+
+    const getDirectionVector = (dir) => {
+      switch (dir) {
+        case 'N': return { dx: 0, dy: -1 };
+        case 'S': return { dx: 0, dy: 1 };
+        case 'W': return { dx: -1, dy: 0 };
+        case 'E': return { dx: 1, dy: 0 };
+        default: return { dx: 0, dy: 0 };
+      }
+    };
+
+    const getOppositeDirection = (dir) => {
+      switch (dir) {
+        case 'N': return 'S';
+        case 'S': return 'N';
+        case 'W': return 'E';
+        case 'E': return 'W';
+      }
+    };
+
+    const isSolid = (type) => [
+      TileType.BLOCK, TileType.PISTON, TileType.PISTON_HEAD, TileType.STICKY_PISTON, 
+      TileType.GLASS, TileType.SLIME, TileType.LAMP, TileType.NOTE_BLOCK, TileType.OBSERVER,
+      TileType.REDSTONE_BLOCK, TileType.TNT, TileType.TARGET, TileType.OBSIDIAN, 
+      TileType.DISPENSER, TileType.DAYLIGHT_SENSOR, TileType.SCULK_SENSOR, 
+      TileType.ANTENNA, TileType.RECEIVER
+    ].includes(type);
+
+    const isImmovable = (type) => [TileType.OBSIDIAN, TileType.PISTON_HEAD, TileType.AIR].includes(type);
+    const isReplaceable = (type) => [
+      TileType.AIR, TileType.DUST, TileType.TORCH, TileType.LEVER, TileType.BUTTON, 
+      TileType.REPEATER, TileType.COMPARATOR, TileType.PRESSURE_PLATE
+    ].includes(type);
+
+    const getConnectedGroup = (grid, startX, startY, excludeX, excludeY) => {
+      const startKey = `${startX},${startY}`;
+      const startTile = grid[startKey];
+      if (!startTile || startTile.type === TileType.AIR || startTile.type === TileType.PISTON_HEAD) return [];
+      if (isImmovable(startTile.type)) return null;
+      const group = new Set([startKey]);
+      const queue = [startKey];
+      let head = 0;
+      while (head < queue.length) {
+        const [cx, cy] = queue[head++].split(',').map(Number);
+        const tile = grid[`${cx},${cy}`];
+        for (const n of getNeighbors(cx, cy)) {
+          const nKey = `${n.x},${n.y}`;
+          if (n.x === excludeX && n.y === excludeY || group.has(nKey)) continue;
+          const nTile = grid[nKey];
+          if (!nTile || nTile.type === TileType.AIR || nTile.type === TileType.PISTON_HEAD) continue;
+          if (tile.type === TileType.SLIME || nTile.type === TileType.SLIME) {
+            if (isImmovable(nTile.type)) return null;
+            group.add(nKey);
+            queue.push(nKey);
+          }
+        }
+        if (group.size > 12) return null;
+      }
+      return Array.from(group);
+    };
+
+    const getPushGroup = (grid, startX, startY, pushDir) => {
+      const { dx, dy } = getDirectionVector(pushDir);
+      const pistonX = startX - dx, pistonY = startY - dy;
+      const startTile = grid[`${startX},${startY}`];
+      if (!startTile) return [];
+      if (isImmovable(startTile.type)) return null;
+      const group = new Set();
+      const initial = getConnectedGroup(grid, startX, startY, pistonX, pistonY);
+      if (!initial) return null;
+      initial.forEach(k => group.add(k));
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const key of Array.from(group)) {
+          const [cx, cy] = key.split(',').map(Number);
+          const fKey = `${cx + dx},${cy + dy}`;
+          const fTile = grid[fKey];
+          if (fTile && fTile.type !== TileType.AIR && !group.has(fKey)) {
+            if (isImmovable(fTile.type)) return null;
+            const added = getConnectedGroup(grid, cx + dx, cy + dy, -1, -1);
+            if (!added) return null;
+            added.forEach(ak => { if (!group.has(ak)) { group.add(ak); changed = true; } });
+          }
+        }
+        if (group.size > 12) return null;
+      }
+      for (const key of group) {
+        const [gx, gy] = key.split(',').map(Number);
+        const tk = `${gx + dx},${gy + dy}`;
+        if (gx+dx < 0 || gx+dx >= GRID_SIZE || gy+dy < 0 || gy+dy >= GRID_SIZE) return null;
+        if (grid[tk] && grid[tk].type !== TileType.AIR && !group.has(tk)) return null;
+      }
+      return Array.from(group);
+    };
+
+    const updateRedstone = (grid, settings) => {
+      let nextGrid = {};
+      const keys = Object.keys(grid);
+      const activeChannels = new Set();
+      keys.forEach(k => { if (grid[k].type === TileType.ANTENNA && grid[k].active) activeChannels.add(grid[k].channel || 0); });
+
+      keys.forEach(key => {
+        const tile = grid[key];
+        const [x, y] = key.split(',').map(Number);
+        let newPower = 0, newActive = tile.active, extra = {};
+        if ([TileType.LEVER, TileType.BUTTON, TileType.PRESSURE_PLATE].includes(tile.type)) newPower = tile.active ? 15 : 0;
+        else if (tile.type === TileType.RECEIVER) { const on = activeChannels.has(tile.channel || 0); newPower = on ? 15 : 0; newActive = on; }
+        else if (tile.type === TileType.DAYLIGHT_SENSOR || tile.type === TileType.REDSTONE_BLOCK) { newPower = 15; newActive = true; }
+        else if ([TileType.SCULK_SENSOR, TileType.TARGET].includes(tile.type)) {
+          if (tile.active) { newPower = 15; let c = (tile.tickCooldown || 0) - 1; if (c <= 0) { newActive = false; c = 0; } extra = { tickCooldown: c }; }
+        } else if (tile.type === TileType.TNT) {
+          const powered = getNeighbors(x, y).some(n => (grid[`${n.x},${n.y}`]?.power || 0) > 0);
+          if (powered || tile.active) { newActive = true; extra = { tickCooldown: (tile.tickCooldown === undefined ? 40 : tile.tickCooldown - 1) }; }
+        } else if (tile.type === TileType.TORCH) {
+          const { dx, dy } = getDirectionVector(getOppositeDirection(tile.direction));
+          const attached = grid[`${x + dx},${y + dy}`];
+          newActive = !(attached && attached.power > 0 && isSolid(attached.type));
+          newPower = newActive ? 15 : 0;
+        } else if (tile.type === TileType.REPEATER) {
+          const inputVec = getDirectionVector(getOppositeDirection(tile.direction));
+          const inputActive = (grid[`${x + inputVec.dx},${y + inputVec.dy}`]?.power || 0) > 0;
+          let cd = tile.tickCooldown || 0, pend = tile.pendingActive ?? tile.active, state = tile.active;
+          if (inputActive !== pend) { pend = inputActive; cd = tile.delay || 1; }
+          if (cd > 0) { cd--; if (cd === 0) state = pend; }
+          newActive = state; newPower = newActive ? 15 : 0; extra = { tickCooldown: cd, pendingActive: pend };
+        } else if (tile.type === TileType.COMPARATOR) {
+          const inputVec = getDirectionVector(getOppositeDirection(tile.direction));
+          const input = grid[`${x + inputVec.dx},${y + inputVec.dy}`]?.power || 0;
+          const sideDirs = tile.direction === 'N' || tile.direction === 'S' ? ['W', 'E'] : ['N', 'S'];
+          const sideMax = Math.max(...sideDirs.map(d => grid[`${x + getDirectionVector(d).dx},${y + getDirectionVector(d).dy}`]?.power || 0));
+          newPower = tile.comparatorMode === 'SUBTRACT' ? Math.max(0, input - sideMax) : (input >= sideMax ? input : 0);
+          newActive = newPower > 0;
+        } else if (tile.type === TileType.OBSERVER) {
+          const { dx, dy } = getDirectionVector(tile.direction);
+          const obs = grid[`${x + dx},${y + dy}`];
+          const changed = (obs?.type !== tile.observedType || (obs?.power || 0) !== (tile.observedPower || 0) || (obs?.active || false) !== (tile.observedActive || false));
+          if (changed && !tile.active) { newActive = true; newPower = 15; } else { newActive = false; newPower = 0; }
+          extra = { observedType: obs?.type || TileType.AIR, observedPower: obs?.power || 0, observedActive: obs?.active || false };
+        }
+        nextGrid[key] = { ...tile, power: newPower, active: newActive, ...extra };
+      });
+
+      const explosionGrid = { ...nextGrid };
+      keys.forEach(k => {
+        const t = nextGrid[k];
+        if (t.type === TileType.TNT && t.active && (t.tickCooldown || 0) <= 0) {
+          const [tx, ty] = k.split(',').map(Number);
+          delete explosionGrid[k];
+          if (settings?.tntDestructive) {
+            for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+              if (Math.sqrt(dx*dx + dy*dy) <= 2.2) {
+                const tk = `${tx+dx},${ty+dy}`;
+                if (nextGrid[tk] && nextGrid[tk].type !== TileType.OBSIDIAN) delete explosionGrid[tk];
+              }
+            }
+          }
+        }
+      });
+      nextGrid = explosionGrid;
+
+      const powerMap = {}, queue = [];
+      Object.keys(nextGrid).forEach(k => {
+        const t = nextGrid[k];
+        if (t.power > 0 && [TileType.LEVER, TileType.BUTTON, TileType.TORCH, TileType.REPEATER, TileType.COMPARATOR, TileType.OBSERVER, TileType.REDSTONE_BLOCK, TileType.TARGET, TileType.DAYLIGHT_SENSOR, TileType.PRESSURE_PLATE, TileType.SCULK_SENSOR, TileType.RECEIVER].includes(t.type)) {
+          powerMap[k] = t.power; queue.push({ key: k, power: t.power });
+        }
+      });
+
+      Object.keys(nextGrid).forEach(k => {
+        const t = nextGrid[k]; const [x, y] = k.split(',').map(Number);
+        if (isSolid(t.type)) {
+          const hp = getNeighbors(x, y).some(n => {
+            const nb = nextGrid[`${n.x},${n.y}`];
+            if (!nb || nb.type === TileType.DUST || nb.power === 0) return false;
+            if ([TileType.TORCH, TileType.REPEATER, TileType.COMPARATOR, TileType.OBSERVER].includes(nb.type)) {
+              const vec = getDirectionVector(nb.direction);
+              return (n.x + vec.dx === x && n.y + vec.dy === y);
+            }
+            return true;
+          });
+          if (hp) { powerMap[k] = 15; queue.push({ key: k, power: 15 }); }
+        }
+      });
+
+      let head = 0;
+      while (head < queue.length) {
+        const { key, power } = queue[head++];
+        const [x, y] = key.split(',').map(Number);
+        getNeighbors(x, y).forEach(n => {
+          const nk = `${n.x},${n.y}`;
+          if (nextGrid[nk]?.type === TileType.DUST) {
+            const np = Math.max(0, power - 1);
+            if (np > (powerMap[nk] || 0)) { powerMap[nk] = np; queue.push({ key: nk, power: np }); }
+          }
+        });
+      }
+
+      Object.keys(powerMap).forEach(k => { if (nextGrid[k]) nextGrid[k].power = powerMap[k]; });
+
+      Object.keys(nextGrid).forEach(k => {
+        const t = nextGrid[k]; const [x, y] = k.split(',').map(Number);
+        if ([TileType.LAMP, TileType.PISTON, TileType.STICKY_PISTON, TileType.TNT, TileType.DISPENSER, TileType.NOTE_BLOCK, TileType.ANTENNA].includes(t.type)) {
+          const p = getNeighbors(x, y).some(n => (powerMap[`${n.x},${n.y}`] || 0) > 0) || (powerMap[k] || 0) > 0;
+          if (t.type === TileType.TNT) { if (p) nextGrid[k].active = true; } else nextGrid[k].active = p;
+        }
+      });
+
+      const finalGrid = { ...nextGrid };
+      Object.keys(nextGrid).forEach(k => {
+        const t = nextGrid[k];
+        if (t.type === TileType.DISPENSER) {
+          const old = grid[k];
+          if (t.active && (!old || !old.active) && t.contents && t.contents !== TileType.AIR) {
+            const [x, y] = k.split(',').map(Number); const { dx, dy } = getDirectionVector(t.direction);
+            const tk = `${x + dx},${y + dy}`;
+            if (!finalGrid[tk] || finalGrid[tk].type === TileType.AIR) {
+              finalGrid[tk] = { type: t.contents, power: 0, direction: t.direction, active: t.contents === TileType.TORCH, level: 7, isSource: true };
+            }
+          }
+        }
+      });
+
+      // Simple Piston movements (Pass 4)
+      Object.keys(nextGrid).forEach(key => {
+        const tile = nextGrid[key];
+        if (tile.type !== TileType.PISTON && tile.type !== TileType.STICKY_PISTON) return;
+        const [x, y] = key.split(',').map(Number); const { dx, dy } = getDirectionVector(tile.direction);
+        const headKey = `${x + dx},${y + dy}`; const old = grid[key];
+        if (!finalGrid[key] || finalGrid[key].type !== tile.type) return;
+
+        if (tile.active && (!old || !old.active)) {
+          const pg = getPushGroup(finalGrid, x + dx, y + dy, tile.direction);
+          if (pg !== null) {
+            const saved = {}; pg.forEach(k => { saved[k] = finalGrid[k]; delete finalGrid[k]; });
+            pg.forEach(k => { const [gx, gy] = k.split(',').map(Number); finalGrid[`${gx + dx},${gy + dy}`] = saved[k]; });
+            finalGrid[headKey] = { type: TileType.PISTON_HEAD, power: 0, direction: tile.direction, active: true };
+          } else finalGrid[key].active = false;
+        } else if (!tile.active && old && old.active) {
+          if (finalGrid[headKey]?.type === TileType.PISTON_HEAD) {
+            delete finalGrid[headKey];
+            if (tile.type === TileType.STICKY_PISTON) {
+              const pullKey = `${x + dx * 2},${y + dy * 2}`;
+              if (finalGrid[pullKey] && !isImmovable(finalGrid[pullKey].type)) {
+                const group = getConnectedGroup(finalGrid, x+dx*2, y+dy*2, x+dx, y+dy);
+                if (group) {
+                  const saved = {}; group.forEach(k => { saved[k] = finalGrid[k]; delete finalGrid[k]; });
+                  group.forEach(k => { const [px, py] = k.split(',').map(Number); finalGrid[`${px - dx},${py - dy}`] = saved[k]; });
+                }
+              }
+            }
+          }
+        }
+      });
+
+      return finalGrid;
+    };
+
+    // --- Main App Component ---
+    const App = () => {
+      const [grid, setGrid] = useState({});
+      const [selectedType, setSelectedType] = useState(TileType.DUST);
+      const [tool, setTool] = useState('BUILD');
+      const [direction, setDirection] = useState('N');
+      const [isPaused, setIsPaused] = useState(false);
+      const [hoveredTile, setHoveredTile] = useState(null);
+      const [settings, setSettings] = useState({ tntDestructive: true, backgroundColor: '#0a0a0a', showGrid: true, simulationSpeed: 100 });
+      const [isMouseDown, setIsMouseDown] = useState(false);
+      const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+      const [showSettings, setShowSettings] = useState(false);
+      const lastNoteRef = useRef({});
+
+      const playClick = (isOn) => {
+        try { const ctx = new AudioContext(); const osc = ctx.createOscillator(); const gain = ctx.createGain(); osc.type = 'sine'; osc.frequency.setValueAtTime(isOn ? 1200 : 800, ctx.currentTime); gain.gain.setValueAtTime(0.05, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.05); osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.1); } catch(e) {}
+      };
+
+      const playNote = (p) => {
+        try { const ctx = new AudioContext(); const osc = ctx.createOscillator(); const gain = ctx.createGain(); osc.type = 'triangle'; osc.frequency.setValueAtTime(185 * Math.pow(2, p / 12), ctx.currentTime); gain.gain.setValueAtTime(0.1, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4); osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.5); } catch(e) {}
+      };
+
+      useEffect(() => {
+        if (isPaused) return;
+        const interval = setInterval(() => {
+          setGrid(prev => {
+            const next = updateRedstone(prev, settings);
+            Object.keys(next).forEach(k => {
+              const t = next[k]; if (t.type === TileType.NOTE_BLOCK) {
+                const [x, y] = k.split(',').map(Number); const p = getNeighbors(x, y).some(n => (next[`${n.x},${n.y}`]?.power || 0) > 0);
+                if (p && !lastNoteRef.current[k]) playNote(t.pitch || 0);
+                lastNoteRef.current[k] = p;
+              }
+            });
+            return next;
+          });
+        }, settings.simulationSpeed);
+        return () => clearInterval(interval);
+      }, [isPaused, settings]);
+
+      useEffect(() => {
+        const hMove = (e) => setMousePos({ x: e.clientX, y: e.clientY });
+        const hUp = () => setIsMouseDown(false);
+        window.addEventListener('mousemove', hMove); window.addEventListener('mouseup', hUp);
+        return () => { window.removeEventListener('mousemove', hMove); window.removeEventListener('mouseup', hUp); };
+      }, []);
+
+      const place = (x, y) => {
+        const k = `${x},${y}`, ex = grid[k];
+        if (ex?.type === TileType.DISPENSER && selectedType !== TileType.DISPENSER) {
+          setGrid(p => ({ ...p, [k]: { ...ex, contents: selectedType } })); playClick(true); return;
+        }
+        setGrid(p => ({ ...p, [k]: { type: selectedType, power: 0, direction, active: selectedType === TileType.TORCH, pitch: 0, delay: 1, level: 7, isSource: true, channel: 0, comparatorMode: 'COMPARE' } }));
+      };
+
+      const del = (x, y) => { setGrid(p => { const n = { ...p }; delete n[`${x},${y}`]; return n; }); };
+
+      const interact = (x, y) => {
+        const k = `${x},${y}`, t = grid[k]; if (!t) return;
+        if (t.type === TileType.LEVER) { playClick(!t.active); setGrid(p => ({ ...p, [k]: { ...t, active: !t.active } })); }
+        else if (t.type === TileType.BUTTON && !t.active) {
+          playClick(true); setGrid(p => ({ ...p, [k]: { ...t, active: true } }));
+          setTimeout(() => setGrid(p => p[k] ? { ...p, [k]: { ...p[k], active: false } } : p), 1500);
+        } else if (t.type === TileType.NOTE_BLOCK) { const np = ((t.pitch || 0) + 1) % 25; playNote(np); setGrid(p => ({ ...p, [k]: { ...t, pitch: np } })); }
+        else if (t.type === TileType.COMPARATOR) { const nm = t.comparatorMode === 'COMPARE' ? 'SUBTRACT' : 'COMPARE'; setGrid(p => ({ ...p, [k]: { ...t, comparatorMode: nm } })); }
+      };
+
+      const hMD = (e, x, y) => {
+        if (e.button === 0) setIsMouseDown(true);
+        if (tool === 'BUILD' && e.button === 0) place(x, y);
+        else if (tool === 'DELETE' && e.button === 0) del(x, y);
+        else if (tool === 'CURSOR' && e.button === 0) interact(x, y);
+      };
+
+      const hME = (x, y) => {
+        setHoveredTile(`${x},${y}`);
+        if (tool === 'CURSOR') {
+          setGrid(p => {
+            const t = p[`${x},${y}`]; if (t?.type === TileType.PRESSURE_PLATE && !t.active) { playClick(true); return { ...p, [`${x},${y}`]: { ...t, active: true } }; }
+            return p;
+          });
+        }
+        if (isMouseDown) { if (tool === 'BUILD') place(x, y); else if (tool === 'DELETE') del(x, y); }
+      };
+
+      const hML = (x, y) => {
+        setHoveredTile(null);
+        setGrid(p => {
+          const t = p[`${x},${y}`]; if (t?.type === TileType.PRESSURE_PLATE && t.active) { playClick(false); return { ...p, [`${x},${y}`]: { ...t, active: false } }; }
+          return p;
+        });
+      };
+
+      const hRC = (e, x, y) => {
+        e.preventDefault(); const k = `${x},${y}`, t = grid[k], seq = ['N', 'E', 'S', 'W'];
+        if (t) {
+          if (t.type === TileType.REPEATER) { setGrid(p => ({ ...p, [k]: { ...t, delay: ((t.delay || 1) % 4) + 1 } })); }
+          else if ([TileType.ANTENNA, TileType.RECEIVER].includes(t.type)) { setGrid(p => ({ ...p, [k]: { ...t, channel: ((t.channel || 0) + 1) % 10 } })); }
+          else setGrid(p => ({ ...p, [k]: { ...t, direction: seq[(seq.indexOf(t.direction) + 1) % 4] } }));
+        } else setDirection(seq[(seq.indexOf(direction) + 1) % 4]);
+      };
+
+      return htag`
+        <div class="flex h-screen w-screen overflow-hidden text-slate-200" style=${{ backgroundColor: settings.backgroundColor }}>
+          <div class="w-80 bg-[#1a1a1a] border-r border-slate-800 flex flex-col p-4 z-20 shadow-2xl overflow-y-auto custom-scroll">
+            <h1 class="text-2xl font-bold mb-6 text-red-500 flex items-center justify-between">
+              <div class="flex items-center gap-2">REDSTONE LAB 2D</div>
+              <button onclick=${() => setShowSettings(!showSettings)} class="text-slate-500 hover:text-slate-300">⚙️</button>
+            </h1>
+            
+            <div class="space-y-6">
+              <section>
+                <h3 class="text-xs uppercase font-bold text-slate-500 mb-3">Tools</h3>
+                <div class="grid grid-cols-2 gap-2">
+                  ${['CURSOR', 'BUILD', 'DELETE'].map(m => htag`
+                    <button onclick=${() => setTool(m)} class=${`p-2 rounded font-bold text-[10px] uppercase border-2 ${tool === m ? 'bg-red-600 border-red-400' : 'bg-slate-800 border-slate-700'}`}>${m}</button>
+                  `)}
+                </div>
+              </section>
+
+              ${tool === 'BUILD' && htag`
+                <section>
+                  <h3 class="text-xs uppercase font-bold text-slate-500 mb-3">Components</h3>
+                  <div class="grid grid-cols-3 gap-2">
+                    ${Object.keys(TileType).filter(k => k !== 'AIR' && k !== 'PISTON_HEAD').map(k => htag`
+                      <button onclick=${() => setSelectedType(TileType[k])} class=${`p-1.5 rounded-lg border-2 flex flex-col items-center gap-1 ${selectedType === TileType[k] ? 'bg-red-950 border-red-600' : 'bg-[#242424] border-transparent'}`}>
+                        <div class="text-base">${ICONS[TileType[k]]}</div>
+                        <div class="text-[8px] uppercase font-bold text-center leading-none mt-1">${k.replace('_', ' ')}</div>
+                      </button>
+                    `)}
+                  </div>
+                </section>
+              `}
+
+              <section>
+                <h3 class="text-xs uppercase font-bold text-slate-500 mb-2">Sim: ${isPaused ? 'PAUSED' : 'RUNNING'}</h3>
+                <button onclick=${() => setIsPaused(!isPaused)} class="w-full py-2 rounded bg-amber-700 font-bold text-xs uppercase">${isPaused ? 'Resume' : 'Pause'}</button>
+              </section>
+
+              <section class="border-t border-slate-800 pt-4">
+                <h3 class="text-xs uppercase font-bold text-slate-500 mb-2">Blueprints</h3>
+                <div class="flex gap-2">
+                  <button onclick=${() => { const data = btoa(JSON.stringify(grid)); prompt('Copy blueprint:', data); }} class="flex-1 py-1 bg-slate-800 rounded text-[10px] font-bold">EXPORT</button>
+                  <button onclick=${() => { const d = prompt('Paste blueprint:'); if(d) setGrid(JSON.parse(atob(d))); }} class="flex-1 py-1 bg-slate-800 rounded text-[10px] font-bold">IMPORT</button>
+                </div>
+              </section>
+            </div>
+          </div>
+
+          <div class="flex-1 relative overflow-auto flex items-center justify-center p-20 custom-scroll">
+            <div class="grid bg-[#121212] ${settings.showGrid ? 'border-4 border-[#222]' : ''}" style=${{ gridTemplateColumns: `repeat(${GRID_SIZE}, ${TILE_SIZE}px)`, width: GRID_SIZE * TILE_SIZE, height: GRID_SIZE * TILE_SIZE }}>
+              ${Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, i) => {
+                const x = i % GRID_SIZE, y = Math.floor(i / GRID_SIZE), k = `${x},${y}`, t = grid[k];
+                let bg = 'transparent', content = null;
+                if (t) {
+                  const rot = { N: 'rotate-0', E: 'rotate-90', S: 'rotate-180', W: '-rotate-90' }[t.direction];
+                  if (t.type === TileType.DUST) bg = t.power > 0 ? COLORS.REDSTONE_ON : COLORS.REDSTONE_OFF;
+                  else if (t.type === TileType.BLOCK) bg = t.power > 0 ? '#b91c1c' : COLORS.BLOCK;
+                  else if (t.type === TileType.LAMP) bg = t.active ? COLORS.LAMP_ON : COLORS.LAMP_OFF;
+                  else if (t.type === TileType.TNT) bg = t.active ? (Math.floor(Date.now()/100)%2===0?'#fff':'#ef4444') : COLORS.TNT;
+                  else if (t.type === TileType.PISTON || t.type === TileType.STICKY_PISTON) content = htag`<div class="w-full h-full flex flex-col items-center bg-stone-600 ${rot}"><div class="w-full h-3 ${t.type === TileType.STICKY_PISTON ? 'bg-green-600' : 'bg-amber-900'}" /></div>`;
+                  else if (t.type === TileType.TORCH) content = htag`<div class="${rot} ${t.active ? '' : 'opacity-40'} flex flex-col items-center"><div class="w-2 h-4 ${t.active ? 'bg-red-500 shadow-[0_0_10px_red]' : 'bg-red-950'}" /><div class="w-1 h-3 bg-amber-900" /></div>`;
+                  else if (t.type === TileType.LEVER) content = htag`<div class="relative w-full h-full flex items-center justify-center"><div class="w-6 h-2 bg-stone-500 absolute" /><div class="w-1 h-6 bg-stone-800 ${t.active ? 'rotate-45' : '-rotate-45'}" /></div>`;
+                  else content = htag`<div class="${rot}">${ICONS[t.type]}</div>`;
+                }
+                return htag`
+                  <div key=${k} onmousedown=${(e) => hMD(e, x, y)} onmouseenter=${() => hME(x, y)} onmouseleave=${() => hML(x, y)} oncontextmenu=${(e) => hRC(e, x, y)}
+                    class="border border-[#242424] flex items-center justify-center relative select-none cursor-crosshair"
+                    style=${{ width: TILE_SIZE, height: TILE_SIZE, backgroundColor: bg }}>
+                    ${content}
+                    ${t?.power > 0 && t.type === TileType.DUST && htag`<span class="absolute bottom-0 right-0 text-[8px] text-white/50">${t.power}</span>`}
+                  </div>
+                `;
+              })}
+            </div>
+            
+            ${showSettings && htag`
+              <div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+                <div class="bg-[#1a1a1a] p-6 border-2 border-slate-700 w-80 rounded-xl">
+                  <h2 class="text-xl mb-4 font-bold text-red-500">Settings</h2>
+                  <div class="space-y-4">
+                    <label class="block">
+                      <span class="text-xs font-bold text-slate-500">Tick Speed (${settings.simulationSpeed}ms)</span>
+                      <input type="range" min="50" max="500" value=${settings.simulationSpeed} oninput=${(e)=>setSettings({...settings, simulationSpeed: parseInt(e.target.value)})} class="w-full" />
+                    </label>
+                    <button onclick=${()=>setSettings({...settings, showGrid: !settings.showGrid})} class="w-full py-2 bg-slate-800 rounded font-bold uppercase text-[10px]">Toggle Grid</button>
+                    <button onclick=${()=>setShowSettings(false)} class="w-full py-2 bg-red-600 rounded font-bold uppercase text-[10px]">Close</button>
+                  </div>
+                </div>
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+    };
+
+    render(htag`<${App} />`, document.getElementById('root'));
+  </script>
+</body>
+</html>

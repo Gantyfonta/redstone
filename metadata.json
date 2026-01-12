@@ -1,0 +1,5 @@
+{
+  "name": "Redstone Simulation",
+  "description": "A two dimensional simulation of Minecraft redstone.",
+  "requestFramePermissions": []
+}
