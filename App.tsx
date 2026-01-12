@@ -1,9 +1,160 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { GridData, TileType, Direction, TileState, AppSettings } from './types';
-import { updateRedstone, getNeighbors } from './services/redstoneEngine';
-import { TICK_RATE, COLORS, TILE_SIZE, GRID_SIZE } from './constants';
+import { GoogleGenAI } from "@google/genai";
+
+// --- Types ---
+export type Direction = 'N' | 'S' | 'E' | 'W';
+
+export enum TileType {
+  AIR = 'AIR',
+  DUST = 'DUST',
+  TORCH = 'TORCH',
+  REPEATER = 'REPEATER',
+  LEVER = 'LEVER',
+  BUTTON = 'BUTTON',
+  LAMP = 'LAMP',
+  BLOCK = 'BLOCK',
+  GLASS = 'GLASS',
+  SLIME = 'SLIME',
+  PISTON = 'PISTON',
+  STICKY_PISTON = 'STICKY_PISTON',
+  PISTON_HEAD = 'PISTON_HEAD',
+  OBSERVER = 'OBSERVER',
+  NOTE_BLOCK = 'NOTE_BLOCK',
+  REDSTONE_BLOCK = 'REDSTONE_BLOCK',
+  COMPARATOR = 'COMPARATOR',
+  TNT = 'TNT',
+  TARGET = 'TARGET',
+  OBSIDIAN = 'OBSIDIAN',
+  DAYLIGHT_SENSOR = 'DAYLIGHT_SENSOR',
+  PRESSURE_PLATE = 'PRESSURE_PLATE',
+  COUNTER = 'COUNTER'
+}
+
+export interface TileState {
+  type: TileType;
+  power: number;
+  direction: Direction;
+  active: boolean;
+  tickCooldown?: number; 
+  pitch?: number; 
+  delay?: number; 
+  pendingActive?: boolean; 
+  comparatorMode?: 'COMPARE' | 'SUBTRACT';
+  isInverted?: boolean; 
+  internalCounter?: number; 
+}
+
+export type GridData = Record<string, TileState>;
+
+export interface AppSettings {
+  tntDestructive: boolean;
+  simulationSpeed: number;
+  dayTime: number; 
+}
 
 type ToolMode = 'CURSOR' | 'BUILD' | 'DELETE' | 'MOVE';
+
+// --- Constants ---
+const GRID_SIZE = 24;
+const TILE_SIZE = 40;
+
+// --- Redstone Engine ---
+const getNeighbors = (x: number, y: number) => [
+  { x, y: y - 1, dir: 'N' as Direction },
+  { x, y: y + 1, dir: 'S' as Direction },
+  { x: x - 1, y, dir: 'W' as Direction },
+  { x: x + 1, y, dir: 'E' as Direction },
+];
+
+const getOpposite = (dir: Direction): Direction => {
+  return { N: 'S', S: 'N', E: 'W', W: 'E' }[dir] as Direction;
+};
+
+const updateRedstone = (grid: GridData, settings: AppSettings): GridData => {
+  let nextGrid: GridData = {};
+  const keys = Object.keys(grid);
+
+  // PASS 1: Logic & Sources
+  keys.forEach(key => {
+    const tile = grid[key];
+    const [x, y] = key.split(',').map(Number);
+    let power = 0, active = tile.active, extra: Partial<TileState> = {};
+
+    if (tile.type === TileType.REDSTONE_BLOCK) power = 15;
+    else if (tile.type === TileType.LEVER) power = tile.active ? 15 : 0;
+    else if (tile.type === TileType.BUTTON) power = tile.active ? 15 : 0;
+    else if (tile.type === TileType.COUNTER) {
+      const nextVal = ((tile.internalCounter || 0) % 15) + 1;
+      power = nextVal;
+      extra = { internalCounter: nextVal };
+    }
+    else if (tile.type === TileType.DAYLIGHT_SENSOR) {
+      const isDay = settings.dayTime < 1200;
+      const peak = isDay ? 600 : 1800;
+      const dist = Math.abs(settings.dayTime - peak);
+      const raw = Math.max(0, 15 - Math.floor(dist / 40));
+      power = tile.isInverted ? (!isDay ? raw : 0) : (isDay ? raw : 0);
+      active = power > 0;
+    }
+    else if (tile.type === TileType.TORCH) {
+      const opp = getOpposite(tile.direction);
+      const vec = { N: {dx:0, dy:-1}, S: {dx:0, dy:1}, E: {dx:1, dy:0}, W: {dx:-1, dy:0} }[opp];
+      const parent = grid[`${x + vec.dx},${y + vec.dy}`];
+      active = !(parent && parent.power > 0);
+      power = active ? 15 : 0;
+    }
+    else if (tile.type === TileType.REPEATER) {
+      const bVec = { N: {dx:0, dy:1}, S: {dx:0, dy:-1}, E: {dx:-1, dy:0}, W: {dx:1, dy:0} }[tile.direction];
+      const input = grid[`${x + bVec.dx},${y + bVec.dy}`];
+      const inputOn = !!(input && input.power > 0);
+      let cd = tile.tickCooldown || 0, pend = tile.pendingActive ?? tile.active, state = tile.active;
+      if (inputOn !== pend) { pend = inputOn; cd = tile.delay || 1; }
+      if (cd > 0) { cd--; if (cd === 0) state = pend; }
+      active = state; power = active ? 15 : 0; extra = { tickCooldown: cd, pendingActive: pend };
+    }
+
+    nextGrid[key] = { ...tile, power, active, ...extra };
+  });
+
+  // PASS 2: Dust Propagation
+  const powerMap: Record<string, number> = {};
+  const queue: { k: string, p: number }[] = [];
+  Object.keys(nextGrid).forEach(k => {
+    if (nextGrid[k].power > 0 && nextGrid[k].type !== TileType.DUST) {
+      powerMap[k] = nextGrid[k].power;
+      queue.push({ k, p: nextGrid[k].power });
+    }
+  });
+
+  let head = 0;
+  while (head < queue.length) {
+    const { k, p } = queue[head++];
+    const [x, y] = k.split(',').map(Number);
+    getNeighbors(x, y).forEach(n => {
+      const nk = `${n.x},${n.y}`;
+      if (nextGrid[nk]?.type === TileType.DUST) {
+        const np = Math.max(0, p - 1);
+        if (np > (powerMap[nk] || 0)) {
+          powerMap[nk] = np;
+          queue.push({ k: nk, p: np });
+        }
+      }
+    });
+  }
+
+  // PASS 3: Consumers
+  const finalGrid = { ...nextGrid };
+  Object.keys(finalGrid).forEach(k => {
+    const t = finalGrid[k];
+    if (t.type === TileType.DUST) t.power = powerMap[k] || 0;
+    if (t.type === TileType.LAMP) {
+      const [x, y] = k.split(',').map(Number);
+      t.active = getNeighbors(x, y).some(n => (powerMap[`${n.x},${n.y}`] || finalGrid[`${n.x},${n.y}`]?.power || 0) > 0);
+    }
+  });
+
+  return finalGrid;
+};
 
 // --- SVG Sprite Component ---
 const Sprite: React.FC<{ 
@@ -15,33 +166,29 @@ const Sprite: React.FC<{
   value?: number 
 }> = ({ type, active, power = 0, direction = 'N', inverted, value }) => {
   const rot = { N: 0, E: 90, S: 180, W: 270 }[direction] || 0;
-  const glowClass = active || power > 0 ? 'redstone-glow' : '';
+  const glow = active || power > 0 ? 'redstone-glow' : '';
   const color = active || power > 0 ? '#ff4d4d' : '#4a0404';
-
-  const style = { transform: `rotate(${rot}deg)` };
 
   switch (type) {
     case TileType.DUST:
       return (
-        <svg viewBox="0 0 40 40" className={`w-full h-full ${glowClass}`}>
+        <svg viewBox="0 0 40 40" className={`w-full h-full ${glow}`}>
           <path d="M18 18h4v4h-4zM10 19h20v2H10zM19 10h2v20h-2z" fill={color} />
         </svg>
       );
     case TileType.TORCH:
       return (
-        <svg viewBox="0 0 40 40" className="w-full h-full" style={style}>
+        <svg viewBox="0 0 40 40" className="w-full h-full" style={{ transform: `rotate(${rot}deg)` }}>
           <rect x="18" y="20" width="4" height="12" fill="#5c4033" />
           <rect x="16" y="10" width="8" height="10" fill={active ? '#ff4d4d' : '#3d0a0a'} className={active ? 'redstone-glow' : ''} />
         </svg>
       );
     case TileType.REPEATER:
-    case TileType.COMPARATOR:
       return (
-        <svg viewBox="0 0 40 40" className="w-full h-full" style={style}>
+        <svg viewBox="0 0 40 40" className="w-full h-full" style={{ transform: `rotate(${rot}deg)` }}>
           <rect x="4" y="4" width="32" height="32" fill="#7a7a7a" rx="2" />
           <rect x="12" y="10" width="4" height="6" fill={active ? '#ff4d4d' : '#3d0a0a'} />
           <rect x="24" y="10" width="4" height="6" fill={active ? '#ff4d4d' : '#3d0a0a'} />
-          {type === TileType.COMPARATOR && <rect x="18" y="10" width="4" height="6" fill={active ? '#ffaaaa' : '#550000'} />}
           <path d="M18 28l4-8 4 8h-8z" fill="#444" />
         </svg>
       );
@@ -52,11 +199,11 @@ const Sprite: React.FC<{
           <rect x="18" y="10" width="4" height="20" fill="#333" style={{ transformOrigin: '20px 30px', transform: `rotate(${active ? 45 : -45}deg)` }} />
         </svg>
       );
-    case TileType.BUTTON:
+    case TileType.COUNTER:
       return (
         <svg viewBox="0 0 40 40" className="w-full h-full">
-          <rect x="14" y="14" width="12" height="12" fill="#444" rx="1" />
-          <rect x="16" y="16" width="8" height="8" fill={active ? '#888' : '#222'} />
+          <rect x="4" y="4" width="32" height="32" fill="#1e293b" rx="4" />
+          <text x="50%" y="26" textAnchor="middle" fill={power > 0 ? '#ff4d4d' : '#444'} fontSize="20" fontWeight="bold" className={power > 0 ? 'redstone-glow' : ''}>{value || 0}</text>
         </svg>
       );
     case TileType.LAMP:
@@ -66,50 +213,12 @@ const Sprite: React.FC<{
           <rect x="8" y="8" width="24" height="24" fill="none" stroke={active ? '#ffcc00' : '#444'} strokeWidth="2" />
         </svg>
       );
-    case TileType.PISTON:
-    case TileType.STICKY_PISTON:
-      return (
-        <svg viewBox="0 0 40 40" className="w-full h-full" style={style}>
-          <rect x="4" y="14" width="32" height="22" fill="#555" />
-          <rect x="4" y="4" width="32" height="10" fill={type === TileType.STICKY_PISTON ? '#4ade80' : '#b45309'} />
-        </svg>
-      );
-    case TileType.PISTON_HEAD:
-      return (
-        <svg viewBox="0 0 40 40" className="w-full h-full" style={style}>
-          <rect x="4" y="4" width="32" height="6" fill="#b45309" />
-          <rect x="18" y="10" width="4" height="26" fill="#555" />
-        </svg>
-      );
-    case TileType.OBSERVER:
-      return (
-        <svg viewBox="0 0 40 40" className="w-full h-full" style={style}>
-          <rect x="4" y="4" width="32" height="32" fill="#333" rx="2" />
-          <rect x="10" y="8" width="20" height="4" fill="#111" />
-          <rect x="18" y="28" width="4" height="4" fill={active ? '#ff0000' : '#400000'} />
-        </svg>
-      );
-    case TileType.TNT:
-      return (
-        <svg viewBox="0 0 40 40" className="w-full h-full">
-          <rect x="4" y="4" width="32" height="32" fill={active ? '#fff' : '#ef4444'} rx="1" />
-          <rect x="4" y="15" width="32" height="10" fill="white" />
-          <text x="50%" y="22" textAnchor="middle" fill="black" fontSize="8" fontWeight="bold">TNT</text>
-        </svg>
-      );
     case TileType.DAYLIGHT_SENSOR:
       return (
         <svg viewBox="0 0 40 40" className="w-full h-full">
           <rect x="4" y="4" width="32" height="32" fill={inverted ? '#1e3a8a' : '#3b82f6'} rx="2" />
           <rect x="12" y="12" width="16" height="16" fill={inverted ? '#a5b4fc' : '#fde047'} rx="8" />
           <text x="50%" y="85%" textAnchor="middle" fill="white" fontSize="8" fontFamily="monospace">{inverted ? 'NIGHT' : 'DAY'}</text>
-        </svg>
-      );
-    case TileType.COUNTER:
-      return (
-        <svg viewBox="0 0 40 40" className="w-full h-full">
-          <rect x="4" y="4" width="32" height="32" fill="#1e293b" rx="4" />
-          <text x="50%" y="26" textAnchor="middle" fill={power > 0 ? '#ff4d4d' : '#444'} fontSize="20" fontWeight="bold" className={power > 0 ? 'redstone-glow' : ''}>{value || 0}</text>
         </svg>
       );
     case TileType.BLOCK:
@@ -121,198 +230,74 @@ const Sprite: React.FC<{
   }
 };
 
-const playNote = (pitch: number) => {
-  try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const audioCtx = new AudioCtx();
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    const freq = 185 * Math.pow(2, (pitch || 0) / 12);
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.4);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + 0.5);
-  } catch (e) {}
-};
-
-const playClick = (isOn: boolean) => {
-  try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const audioCtx = new AudioCtx();
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(isOn ? 1200 : 800, audioCtx.currentTime);
-    gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.05);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + 0.1);
-  } catch (e) {}
-};
-
 const App: React.FC = () => {
   const [grid, setGrid] = useState<GridData>({});
   const [selectedType, setSelectedType] = useState<TileType>(TileType.DUST);
   const [direction, setDirection] = useState<Direction>('N');
+  const [tool, setTool] = useState<ToolMode>('BUILD');
   const [isPaused, setIsPaused] = useState(false);
   const [hoveredTile, setHoveredTile] = useState<string | null>(null);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [blueprintInput, setBlueprintInput] = useState('');
-  const [tool, setTool] = useState<ToolMode>('BUILD');
   const [draggedKey, setDraggedKey] = useState<string | null>(null);
   const [isMouseDown, setIsMouseDown] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const [settings, setSettings] = useState<AppSettings>({
     tntDestructive: true,
-    backgroundColor: '#0a0a0a',
-    showGrid: true,
     simulationSpeed: 100,
     dayTime: 600
   });
 
-  const lastNoteBlockSignals = useRef<Record<string, boolean>>({});
-
-  const getRotatedDirection = (dir: Direction): Direction => {
-    const sequence: Direction[] = ['N', 'E', 'S', 'W'];
-    return sequence[(sequence.indexOf(dir) + 1) % 4];
-  };
-
   const getDynamicBackground = () => {
-    const time = settings.dayTime;
-    let r, g, b;
-    if (time < 1200) {
-      const factor = Math.sin(Math.PI * time / 1200);
-      r = 5 + Math.floor(40 * factor);
-      g = 5 + Math.floor(60 * factor);
-      b = 10 + Math.floor(120 * factor);
-    } else {
-      const factor = Math.sin(Math.PI * (time - 1200) / 1200);
-      r = 5 + Math.floor(5 * factor);
-      g = 5 + Math.floor(10 * factor);
-      b = 10 + Math.floor(30 * factor);
-    }
-    return `rgb(${r}, ${g}, ${b})`;
+    const factor = Math.sin(Math.PI * settings.dayTime / 1200);
+    return settings.dayTime < 1200 
+      ? `rgb(${5 + 30 * factor}, ${5 + 50 * factor}, ${10 + 100 * factor})`
+      : `rgb(${5}, ${5}, ${10})`;
   };
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
-      if (e.key === '1') setTool('CURSOR');
-      if (e.key === '2') setTool('BUILD');
-      if (e.key === '3') setTool('DELETE');
-      if (e.key === '4') setTool('MOVE');
-      if (e.key === 'Escape') setShowSettings(false);
-    };
-    const handleGlobalMouseUp = () => {
-      setIsMouseDown(false);
-      setDraggedKey(null);
-    };
-    const handleMouseMoveGlobal = (e: MouseEvent) => setMousePos({ x: e.clientX, y: e.clientY });
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('mouseup', handleGlobalMouseUp);
-    window.addEventListener('mousemove', handleMouseMoveGlobal);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('mouseup', handleGlobalMouseUp);
-      window.removeEventListener('mousemove', handleMouseMoveGlobal);
-    };
-  }, []);
 
   useEffect(() => {
     if (isPaused) return;
     const interval = setInterval(() => {
       setSettings(prev => ({ ...prev, dayTime: (prev.dayTime + 1) % 2400 }));
-      setGrid(prev => {
-        const next = updateRedstone(prev, { ...settings, dayTime: (settings.dayTime + 1) % 2400 });
-        Object.keys(next).forEach(key => {
-          const tile = next[key];
-          if (tile.type === TileType.NOTE_BLOCK) {
-            const [x, y] = key.split(',').map(Number);
-            const isPowered = getNeighbors(x, y).some(n => (next[`${n.x},${n.y}`]?.power || 0) > 0);
-            if (isPowered && !lastNoteBlockSignals.current[key]) playNote(tile.pitch || 0);
-            lastNoteBlockSignals.current[key] = isPowered;
-          }
-        });
-        return next;
-      });
+      setGrid(prev => updateRedstone(prev, { ...settings, dayTime: (settings.dayTime + 1) % 2400 }));
     }, settings.simulationSpeed);
     return () => clearInterval(interval);
   }, [isPaused, settings]);
 
-  const placeTile = (x: number, y: number) => {
-    const key = `${x},${y}`;
-    setGrid(prev => ({
-      ...prev,
-      [key]: {
-        type: selectedType,
-        power: 0,
-        direction,
-        active: selectedType === TileType.TORCH,
-        pitch: selectedType === TileType.NOTE_BLOCK ? 0 : undefined,
-        delay: selectedType === TileType.REPEATER ? 1 : undefined,
-        isInverted: false,
-        internalCounter: selectedType === TileType.COUNTER ? 1 : undefined,
-        comparatorMode: selectedType === TileType.COMPARATOR ? 'COMPARE' : undefined,
-      } as TileState
-    }));
-  };
-
-  const deleteTile = (x: number, y: number) => {
-    setGrid(prev => {
-      const next = { ...prev };
-      delete next[`${x},${y}`];
-      return next;
-    });
-  };
-
-  const interactTile = (x: number, y: number) => {
-    const key = `${x},${y}`;
-    const tile = grid[key];
-    if (!tile) return;
-    if (tile.type === TileType.LEVER) {
-      playClick(!tile.active);
-      setGrid(prev => ({ ...prev, [key]: { ...tile, active: !tile.active } }));
-    } else if (tile.type === TileType.BUTTON && !tile.active) {
-      playClick(true);
-      setGrid(prev => ({ ...prev, [key]: { ...tile, active: true } }));
-      setTimeout(() => setGrid(prev => prev[key] ? { ...prev, [key]: { ...prev[key], active: false } } : prev), 1000);
-    } else if (tile.type === TileType.DAYLIGHT_SENSOR) {
-      playClick(true);
-      setGrid(prev => ({ ...prev, [key]: { ...tile, isInverted: !tile.isInverted } }));
+  const handleAnalyze = async () => {
+    setIsAnalyzing(true);
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const summary = Object.entries(grid)
+      .map(([k, t]) => `${t.type} at ${k}`)
+      .join(', ');
+    
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-pro-preview',
+        contents: `Analyze this redstone circuit summary: ${summary || 'Empty lab'}`
+      });
+      setAiAnalysis(response.text || "No analysis available.");
+    } catch (e) {
+      setAiAnalysis("Analysis failed.");
     }
+    setIsAnalyzing(false);
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden text-slate-200 transition-colors duration-1000" style={{ backgroundColor: getDynamicBackground() }}>
+    <div className="flex h-screen w-screen overflow-hidden text-slate-200" style={{ backgroundColor: getDynamicBackground() }}>
       {/* Sidebar */}
-      <div className="w-80 bg-[#1a1a1a]/90 backdrop-blur-md border-r border-slate-800 flex flex-col p-4 z-20 shadow-2xl overflow-y-auto custom-scroll">
-        <h1 className="text-2xl font-bold mb-6 text-red-500 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 bg-red-600 rounded-full animate-pulse shadow-[0_0_8px_red]" />
-            REDSTONE LAB
-          </div>
-          <button onClick={() => setShowSettings(!showSettings)} className="text-slate-500 hover:text-slate-300">⚙️</button>
+      <div className="w-80 bg-[#1a1a1a]/95 backdrop-blur-lg border-r border-slate-800 flex flex-col p-6 z-20 shadow-2xl overflow-y-auto custom-scroll">
+        <h1 className="text-2xl font-bold mb-8 text-red-500 flex items-center gap-2">
+          <div className="w-3 h-3 bg-red-600 rounded-full animate-pulse shadow-[0_0_8px_red]" />
+          REDSTONE LAB
         </h1>
 
-        <div className="space-y-6">
+        <div className="space-y-8">
           <section>
-            <h3 className="text-xs uppercase font-bold tracking-widest text-slate-500 mb-3 flex justify-between">
-              <span>Tools</span>
-              <span className="text-[9px] text-slate-600">[1-4]</span>
-            </h3>
+            <h3 className="text-xs uppercase font-bold text-slate-500 mb-4 tracking-widest">Tools</h3>
             <div className="grid grid-cols-2 gap-2">
-              {(['CURSOR', 'BUILD', 'DELETE', 'MOVE'] as ToolMode[]).map((m, idx) => (
-                <button key={m} onClick={() => setTool(m)} className={`p-2 rounded font-bold text-[10px] uppercase border-2 transition-all ${tool === m ? 'bg-red-600 border-red-400 text-white shadow-lg' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'}`}>
+              {(['CURSOR', 'BUILD', 'DELETE', 'MOVE'] as ToolMode[]).map(m => (
+                <button key={m} onClick={() => setTool(m)} className={`p-2 rounded font-bold text-[11px] uppercase border transition-all ${tool === m ? 'bg-red-600 border-red-400 text-white shadow-lg' : 'bg-slate-800/50 border-white/10 text-slate-400 hover:border-slate-500'}`}>
                   {m}
                 </button>
               ))}
@@ -321,33 +306,42 @@ const App: React.FC = () => {
 
           {tool === 'BUILD' && (
             <section>
-              <h3 className="text-xs uppercase font-bold tracking-widest text-slate-500 mb-3">Components</h3>
+              <h3 className="text-xs uppercase font-bold text-slate-500 mb-4 tracking-widest">Components</h3>
               <div className="grid grid-cols-3 gap-2">
                 {Object.values(TileType).filter(v => v !== TileType.AIR && v !== TileType.PISTON_HEAD).map(type => (
-                  <button key={type} onClick={() => setSelectedType(type)} className={`p-1.5 rounded-lg border-2 flex flex-col items-center gap-1 transition-all ${selectedType === type ? 'bg-red-950/50 border-red-600' : 'bg-[#242424] border-transparent hover:border-slate-600'}`}>
+                  <button key={type} onClick={() => setSelectedType(type)} className={`p-2 rounded-lg border flex flex-col items-center gap-1 transition-all ${selectedType === type ? 'bg-red-950/40 border-red-500' : 'bg-white/5 border-transparent hover:border-white/10'}`}>
                     <div className="w-8 h-8"><Sprite type={type} active={true} direction="N" /></div>
-                    <span className="text-[8px] uppercase font-bold truncate w-full text-center leading-none mt-1">{type.replace('_', ' ')}</span>
+                    <span className="text-[9px] uppercase font-bold truncate w-full text-center mt-1 opacity-70">{type.replace('_', ' ')}</span>
                   </button>
                 ))}
               </div>
             </section>
           )}
 
-          <section className="bg-black/40 p-3 rounded-lg border border-slate-800">
-             <div className="flex items-center justify-between text-[10px] font-bold uppercase mb-2">
+          <section className="bg-black/40 p-4 rounded-xl border border-white/10">
+             <div className="flex items-center justify-between text-[10px] font-bold uppercase mb-3">
                 <span>{settings.dayTime < 1200 ? '☀️ Day' : '🌙 Night'}</span>
-                <span className="text-slate-500">{Math.floor(settings.dayTime / 100)}:00</span>
+                <span>{Math.floor(settings.dayTime / 100)}:00</span>
              </div>
-             <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
-                <div className="h-full bg-red-500 transition-all duration-300" style={{ width: `${(settings.dayTime / 2400) * 100}%` }} />
+             <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                <div className="h-full bg-red-500" style={{ width: `${(settings.dayTime / 2400) * 100}%` }} />
              </div>
           </section>
 
-          <section className="pt-4 border-t border-slate-800">
-             <button onClick={() => setIsPaused(!isPaused)} className={`w-full py-2 rounded font-bold text-xs uppercase ${isPaused ? 'bg-green-700 hover:bg-green-600' : 'bg-amber-700 hover:bg-amber-600'}`}>
-               {isPaused ? '▶ Resume' : '⏸ Pause'}
-             </button>
+          <section className="space-y-2">
+            <button onClick={() => setIsPaused(!isPaused)} className="w-full py-2 bg-white/5 border border-white/10 hover:bg-white/10 rounded font-bold text-xs uppercase">
+              {isPaused ? '▶ Resume' : '⏸ Pause'}
+            </button>
+            <button onClick={handleAnalyze} disabled={isAnalyzing} className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 rounded font-bold text-xs uppercase shadow-lg disabled:opacity-50">
+              {isAnalyzing ? 'Analyzing...' : 'AI Logic Analysis'}
+            </button>
           </section>
+
+          {aiAnalysis && (
+            <div className="text-[11px] p-3 bg-indigo-950/30 border border-indigo-500/30 rounded text-indigo-200 leading-relaxed italic">
+              "{aiAnalysis}"
+            </div>
+          )}
         </div>
       </div>
 
@@ -355,96 +349,50 @@ const App: React.FC = () => {
       <div className="flex-1 relative overflow-auto flex items-center justify-center p-20 custom-scroll">
         <div className="grid-bg shadow-2xl relative" style={{ display: 'grid', gridTemplateColumns: `repeat(${GRID_SIZE}, ${TILE_SIZE}px)`, width: GRID_SIZE * TILE_SIZE, height: GRID_SIZE * TILE_SIZE }}>
           {Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, i) => {
-            const x = i % GRID_SIZE;
-            const y = Math.floor(i / GRID_SIZE);
-            const key = `${x},${y}`;
-            const tile = grid[key];
-            const isDragged = draggedKey === key;
-            const isTarget = hoveredTile === key && draggedKey;
-
+            const x = i % GRID_SIZE, y = Math.floor(i / GRID_SIZE), k = `${x},${y}`, tile = grid[k];
             return (
               <div 
-                key={key}
-                onMouseDown={(e) => {
-                  if (e.button !== 0) return;
+                key={k}
+                onMouseDown={() => {
                   setIsMouseDown(true);
-                  if (tool === 'BUILD') placeTile(x, y);
-                  else if (tool === 'DELETE') deleteTile(x, y);
-                  else if (tool === 'CURSOR') interactTile(x, y);
-                  else if (tool === 'MOVE' && grid[key]) setDraggedKey(key);
+                  if (tool === 'BUILD') setGrid(g => ({ ...g, [k]: { type: selectedType, power: 0, direction, active: selectedType === TileType.TORCH, internalCounter: 0, isInverted: false } }));
+                  else if (tool === 'DELETE') setGrid(g => { const n = { ...g }; delete n[k]; return n; });
+                  else if (tool === 'CURSOR' && tile?.type === TileType.LEVER) setGrid(g => ({ ...g, [k]: { ...tile, active: !tile.active } }));
+                  else if (tool === 'CURSOR' && tile?.type === TileType.DAYLIGHT_SENSOR) setGrid(g => ({ ...g, [k]: { ...tile, isInverted: !tile.isInverted } }));
+                  else if (tool === 'MOVE' && grid[k]) setDraggedKey(k);
                 }}
                 onMouseEnter={() => {
-                  setHoveredTile(key);
+                  setHoveredTile(k);
                   if (isMouseDown) {
-                    if (tool === 'BUILD') placeTile(x, y);
-                    else if (tool === 'DELETE') deleteTile(x, y);
+                    if (tool === 'BUILD') setGrid(g => ({ ...g, [k]: { type: selectedType, power: 0, direction, active: selectedType === TileType.TORCH, internalCounter: 0, isInverted: false } }));
+                    else if (tool === 'DELETE') setGrid(g => { const n = { ...g }; delete n[k]; return n; });
                   }
                 }}
                 onMouseUp={() => {
-                  if (tool === 'MOVE' && draggedKey && draggedKey !== key) {
-                    setGrid(prev => {
-                      const next = { ...prev };
-                      next[key] = next[draggedKey];
-                      delete next[draggedKey];
-                      return next;
-                    });
-                    playClick(true);
+                  if (tool === 'MOVE' && draggedKey && draggedKey !== k) {
+                    setGrid(g => { const n = { ...g }; n[k] = n[draggedKey]; delete n[draggedKey]; return n; });
                   }
-                  setDraggedKey(null);
+                  setDraggedKey(null); setIsMouseDown(false);
                 }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   if (tile) {
-                    const nextDir = getRotatedDirection(tile.direction);
-                    setGrid(prev => ({ ...prev, [key]: { ...tile, direction: nextDir } }));
+                    const d = { N: 'E', E: 'S', S: 'W', W: 'N' }[tile.direction] as Direction;
+                    setGrid(g => ({ ...g, [k]: { ...tile, direction: d } }));
                   } else {
-                    setDirection(prev => getRotatedDirection(prev));
+                    setDirection(d => ({ N: 'E', E: 'S', S: 'W', W: 'N' }[d] as Direction));
                   }
                 }}
-                className={`border border-white/5 flex items-center justify-center relative transition-all ${isTarget ? 'bg-white/10 scale-105 z-10' : ''} ${isDragged ? 'opacity-20' : ''}`}
+                className={`border border-white/5 flex items-center justify-center relative ${hoveredTile === k && tool === 'MOVE' && draggedKey ? 'bg-white/10 scale-105 z-10' : ''} ${draggedKey === k ? 'opacity-20' : ''}`}
                 style={{ width: TILE_SIZE, height: TILE_SIZE }}
               >
                 {tile && <Sprite type={tile.type} active={tile.active} power={tile.power} direction={tile.direction} inverted={tile.isInverted} value={tile.internalCounter} />}
-                {hoveredTile === key && tool === 'BUILD' && !tile && <div className="opacity-30 pointer-events-none scale-75"><Sprite type={selectedType} direction={direction} /></div>}
-                {tile?.type === TileType.DUST && tile.power > 0 && <span className="absolute bottom-0 right-0 text-[8px] opacity-70 bg-black/40 px-0.5">{tile.power}</span>}
+                {hoveredTile === k && tool === 'BUILD' && !tile && <div className="opacity-20 scale-75 pointer-events-none"><Sprite type={selectedType} direction={direction} /></div>}
               </div>
             );
           })}
         </div>
-
-        {/* HUD */}
-        <div className="fixed bottom-6 right-6 bg-black/80 backdrop-blur-md px-4 py-2 rounded-full border border-slate-700 text-[10px] text-slate-400 flex gap-4 uppercase font-bold tracking-widest shadow-lg z-30">
-          <div className="flex items-center gap-1"><span className={`w-2 h-2 rounded-full ${isPaused ? 'bg-amber-500' : 'bg-green-500 animate-pulse'}`} />{isPaused ? 'Paused' : 'Running'}</div>
-          <div className="border-l border-slate-800 pl-4">Tool: {tool}</div>
-          <div className="border-l border-slate-800 pl-4">Tick: {settings.dayTime}</div>
-        </div>
-
-        {/* Inspector Tooltip */}
-        {hoveredTile && grid[hoveredTile] && (
-          <div className="fixed pointer-events-none z-50 bg-black/90 border border-red-900 rounded p-2 text-[10px] shadow-xl" style={{ left: mousePos.x + 15, top: mousePos.y + 15 }}>
-            <div className="text-red-500 font-bold uppercase mb-1">{grid[hoveredTile].type.replace('_', ' ')}</div>
-            <div>Power: {grid[hoveredTile].power}</div>
-            <div>Dir: {grid[hoveredTile].direction}</div>
-            {grid[hoveredTile].type === TileType.COUNTER && <div>Value: {grid[hoveredTile].internalCounter}</div>}
-          </div>
-        )}
       </div>
-
-      {/* Settings Modal */}
-      {showSettings && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="bg-[#1a1a1a] border-2 border-slate-700 w-80 rounded-xl p-6 shadow-2xl">
-            <h2 className="text-xl font-bold text-red-500 mb-6 uppercase tracking-wider">Settings</h2>
-            <div className="space-y-4">
-               <label className="block">
-                 <span className="text-xs font-bold text-slate-500 uppercase">Simulation Speed ({settings.simulationSpeed}ms)</span>
-                 <input type="range" min="50" max="500" value={settings.simulationSpeed} onChange={(e) => setSettings(s => ({...s, simulationSpeed: parseInt(e.target.value)}))} className="w-full accent-red-600 mt-2" />
-               </label>
-               <button onClick={() => setShowSettings(false)} className="w-full py-2 bg-red-600 text-white font-bold rounded uppercase tracking-widest text-xs mt-4">Close</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
