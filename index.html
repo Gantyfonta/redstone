@@ -74,6 +74,9 @@
       PRESSURE_PLATE: 'PRESSURE_PLATE', COUNTER: 'COUNTER'
     };
 
+    // Fix: Define ICONS as an empty object or map if fallback is needed
+    const ICONS = {};
+
     // --- SVG Sprite Components ---
     const Sprite = ({ type, active, power, direction, mode, inverted, value }) => {
       const rot = { N: 0, E: 90, S: 180, W: 270 }[direction] || 0;
@@ -93,11 +96,13 @@
               <rect x="16" y="10" width="8" height="10" fill="${active ? '#ff4d4d' : '#3d0a0a'}" class="${active ? 'redstone-glow' : ''}" />
             </svg>`;
         case TileType.REPEATER:
+        case TileType.COMPARATOR:
           return html`
             <svg viewBox="0 0 40 40" class="w-full h-full" style="transform: rotate(${rot}deg)">
               <rect x="4" y="4" width="32" height="32" fill="#7a7a7a" rx="2" />
               <rect x="12" y="10" width="4" height="6" fill="${active ? '#ff4d4d' : '#3d0a0a'}" />
               <rect x="24" y="10" width="4" height="6" fill="${active ? '#ff4d4d' : '#3d0a0a'}" />
+              ${type === TileType.COMPARATOR ? html`<rect x="18" y="10" width="4" height="6" fill="${active ? '#ffaaaa' : '#550000'}" />` : null}
               <path d="M18 28l4-8 4 8h-8z" fill="#444" />
             </svg>`;
         case TileType.LEVER:
@@ -105,6 +110,12 @@
             <svg viewBox="0 0 40 40" class="w-full h-full">
               <rect x="10" y="28" width="20" height="4" fill="#555" />
               <rect x="18" y="10" width="4" height="20" fill="#333" style="transform-origin: 20px 30px; transform: rotate(${active ? 45 : -45}deg)" />
+            </svg>`;
+        case TileType.BUTTON:
+          return html`
+            <svg viewBox="0 0 40 40" class="w-full h-full">
+              <rect x="14" y="14" width="12" height="12" fill="#444" rx="1" />
+              <rect x="16" y="16" width="8" height="8" fill="${active ? '#888' : '#222'}" />
             </svg>`;
         case TileType.LAMP:
           return html`
@@ -119,6 +130,47 @@
               <rect x="4" y="14" width="32" height="22" fill="#555" />
               <rect x="4" y="4" width="32" height="10" fill="${type === TileType.STICKY_PISTON ? '#4ade80' : '#b45309'}" />
             </svg>`;
+        case TileType.PISTON_HEAD:
+          return html`
+            <svg viewBox="0 0 40 40" class="w-full h-full" style="transform: rotate(${rot}deg)">
+              <rect x="4" y="4" width="32" height="6" fill="#b45309" />
+              <rect x="18" y="10" width="4" height="26" fill="#555" />
+            </svg>`;
+        case TileType.OBSERVER:
+          return html`
+            <svg viewBox="0 0 40 40" class="w-full h-full" style="transform: rotate(${rot}deg)">
+              <rect x="4" y="4" width="32" height="32" fill="#333" rx="2" />
+              <rect x="10" y="8" width="20" height="4" fill="#111" />
+              <rect x="18" y="28" width="4" height="4" fill="${active ? '#ff0000' : '#400000'}" />
+            </svg>`;
+        case TileType.NOTE_BLOCK:
+          return html`
+            <svg viewBox="0 0 40 40" class="w-full h-full">
+              <rect x="4" y="4" width="32" height="32" fill="#5c4033" rx="2" />
+              <path d="M15 15v10l10-2v-10l-10 2z" fill="#3d2b22" />
+              <circle cx="13" cy="25" r="3" fill="#3d2b22" />
+              <circle cx="23" cy="23" r="3" fill="#3d2b22" />
+            </svg>`;
+        case TileType.TNT:
+          return html`
+            <svg viewBox="0 0 40 40" class="w-full h-full">
+              <rect x="4" y="4" width="32" height="32" fill="${active ? '#fff' : '#ef4444'}" rx="1" />
+              <rect x="4" y="15" width="32" height="10" fill="white" />
+              <text x="50%" y="22" text-anchor="middle" fill="black" font-size="8" font-weight="bold">TNT</text>
+            </svg>`;
+        case TileType.TARGET:
+          return html`
+            <svg viewBox="0 0 40 40" class="w-full h-full">
+              <circle cx="20" cy="20" r="16" fill="white" stroke="#ef4444" stroke-width="2" />
+              <circle cx="20" cy="20" r="10" fill="none" stroke="#ef4444" stroke-width="2" />
+              <circle cx="20" cy="20" r="4" fill="#ef4444" />
+            </svg>`;
+        case TileType.OBSIDIAN:
+          return html`<div class="w-full h-full bg-[#1a0d2b] border border-[#2d1b4d] shadow-[inset_0_0_5px_rgba(255,255,255,0.1)]" />`;
+        case TileType.GLASS:
+          return html`<div class="w-full h-full border border-cyan-400/30 bg-cyan-100/10" />`;
+        case TileType.SLIME:
+          return html`<div class="w-full h-full bg-green-500/60 border border-green-600 shadow-[inset_0_0_10px_rgba(0,0,0,0.2)]" />`;
         case TileType.DAYLIGHT_SENSOR:
           return html`
             <svg viewBox="0 0 40 40" class="w-full h-full">
@@ -126,11 +178,16 @@
               <rect x="12" y="12" width="16" height="16" fill="${inverted ? '#a5b4fc' : '#fde047'}" rx="8" />
               <text x="50%" y="85%" text-anchor="middle" fill="white" font-size="8" font-family="monospace">${inverted ? 'NIGHT' : 'DAY'}</text>
             </svg>`;
+        case TileType.PRESSURE_PLATE:
+          return html`
+            <svg viewBox="0 0 40 40" class="w-full h-full">
+              <rect x="6" y="${active ? 20 : 18}" width="28" height="${active ? 2 : 4}" fill="#777" rx="1" />
+            </svg>`;
         case TileType.COUNTER:
           return html`
             <svg viewBox="0 0 40 40" class="w-full h-full">
               <rect x="4" y="4" width="32" height="32" fill="#1e293b" rx="4" />
-              <text x="50%" y="65%" text-anchor="middle" fill="${power > 0 ? '#ff4d4d' : '#444'}" font-size="20" font-weight="bold" class="${power > 0 ? 'redstone-glow' : ''}">${value}</text>
+              <text x="50%" y="65%" text-anchor="middle" fill="${power > 0 ? '#ff4d4d' : '#444'}" font-size="20" font-weight="bold" class="${power > 0 ? 'redstone-glow' : ''}">${value || 0}</text>
             </svg>`;
         case TileType.BLOCK:
           return html`<div class="w-full h-full ${power > 0 ? 'bg-red-700' : 'bg-gray-600'} border border-gray-800 shadow-inner" />`;
@@ -175,23 +232,22 @@
 
         if (tile.type === TileType.REDSTONE_BLOCK) { power = 15; active = true; }
         else if (tile.type === TileType.LEVER) power = tile.active ? 15 : 0;
+        else if (tile.type === TileType.BUTTON) {
+           power = tile.active ? 15 : 0;
+        }
         else if (tile.type === TileType.COUNTER) {
           const nextVal = ((tile.internalCounter || 0) % 15) + 1;
           power = nextVal;
           extra = { internalCounter: nextVal };
         }
         else if (tile.type === TileType.DAYLIGHT_SENSOR) {
-          // dayTime is 0-2400. 0-1200 is Day.
           const isDay = dayTime < 1200;
           const peak = isDay ? 600 : 1800;
           const dist = Math.abs(dayTime - peak);
           const raw = Math.max(0, 15 - Math.floor(dist / 40));
           
-          if (tile.isInverted) { // Night Mode
-            power = !isDay ? raw : 0;
-          } else { // Day Mode
-            power = isDay ? raw : 0;
-          }
+          if (tile.isInverted) { power = !isDay ? raw : 0; }
+          else { power = isDay ? raw : 0; }
           active = power > 0;
         }
         else if (tile.type === TileType.TORCH) {
@@ -242,15 +298,17 @@
         });
       }
 
-      // PASS 3: Consumers (Lamps, Pistons)
+      // PASS 3: Consumers
       const finalGrid = { ...nextGrid };
       Object.keys(finalGrid).forEach(k => {
         const t = finalGrid[k];
         if (t.type === TileType.DUST) t.power = powerMap[k] || 0;
         
-        if (t.type === TileType.LAMP) {
+        if (t.type === TileType.LAMP || t.type === TileType.TNT) {
           const [x, y] = k.split(',').map(Number);
-          t.active = getNeighbors(x, y).some(n => (powerMap[`${n.x},${n.y}`] || finalGrid[`${n.x},${n.y}`]?.power || 0) > 0);
+          const powered = getNeighbors(x, y).some(n => (powerMap[`${n.x},${n.y}`] || finalGrid[`${n.x},${n.y}`]?.power || 0) > 0);
+          if (t.type === TileType.LAMP) t.active = powered;
+          if (t.type === TileType.TNT && powered) t.active = true;
         }
       });
 
@@ -270,7 +328,6 @@
       const [showSettings, setShowSettings] = useState(false);
       const [isMouseDown, setIsMouseDown] = useState(false);
 
-      // Simulation Loop
       useEffect(() => {
         if (isPaused) return;
         const id = setInterval(() => {
@@ -280,9 +337,9 @@
         return () => clearInterval(id);
       }, [isPaused, dayTime]);
 
-      // Global Shortcuts
       useEffect(() => {
         const handle = (e) => {
+          if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
           if (e.key === '1') setTool('CURSOR');
           if (e.key === '2') setTool('BUILD');
           if (e.key === '3') setTool('DELETE');
@@ -306,7 +363,7 @@
         setIsMouseDown(true);
         const k = `${x},${y}`;
         if (tool === 'BUILD') {
-          setGrid(g => ({ ...g, [k]: { type: selected, power: 0, active: false, direction, internalCounter: 0, isInverted: false } }));
+          setGrid(g => ({ ...g, [k]: { type: selected, power: 0, active: selected === TileType.TORCH, direction, internalCounter: 0, isInverted: false } }));
           playClick(true);
         } else if (tool === 'DELETE') {
           setGrid(g => { const n = { ...g }; delete n[k]; return n; });
@@ -315,6 +372,10 @@
           if (t?.type === TileType.LEVER) {
             setGrid(g => ({ ...g, [k]: { ...t, active: !t.active } }));
             playClick(!t.active);
+          } else if (t?.type === TileType.BUTTON && !t.active) {
+            setGrid(g => ({ ...g, [k]: { ...t, active: true } }));
+            playClick(true);
+            setTimeout(() => setGrid(g => g[k] ? { ...g, [k]: { ...g[k], active: false } } : g), 1000);
           }
         } else if (tool === 'MOVE' && grid[k]) {
           setDragged(k);
@@ -362,7 +423,6 @@
 
       return html`
         <div class="flex h-screen w-screen transition-colors duration-1000" style="background-color: ${getSkyColor()}">
-          <!-- Sidebar -->
           <div class="w-80 bg-black/80 backdrop-blur-md border-r border-white/10 flex flex-col p-6 z-20 shadow-2xl overflow-y-auto custom-scroll">
             <h1 class="text-3xl font-bold mb-8 text-red-500 flex items-center gap-3">
               <div class="w-4 h-4 bg-red-600 rounded-full animate-pulse shadow-[0_0_12px_red]" />
@@ -392,7 +452,9 @@
                     ${Object.keys(TileType).filter(k => k !== 'AIR' && k !== 'PISTON_HEAD').map(k => html`
                       <button onclick=${() => setSelected(TileType[k])} 
                         class="p-2 rounded-lg border flex flex-col items-center gap-2 transition-all ${selected === TileType[k] ? 'bg-red-900/40 border-red-500' : 'bg-white/5 border-transparent hover:border-white/20'}">
-                        <div class="w-8 h-8">${ICONS[TileType[k]] || html`<${Sprite} type=${TileType[k]} active=${true} direction="N" />`}</div>
+                        <div class="w-8 h-8">
+                          <${Sprite} type=${TileType[k]} active=${true} direction="N" />
+                        </div>
                         <span class="text-[9px] uppercase font-bold truncate w-full text-center opacity-70">${k.replace('_', ' ')}</span>
                       </button>
                     `)}
@@ -422,7 +484,6 @@
             </div>
           </div>
 
-          <!-- Grid Area -->
           <div class="flex-1 relative overflow-auto flex items-center justify-center p-12 custom-scroll">
             <div class="grid-bg shadow-[0_0_100px_rgba(0,0,0,0.8)] relative" 
                  style="display: grid; grid-template-columns: repeat(${GRID_SIZE}, ${TILE_SIZE}px); width: ${GRID_SIZE * TILE_SIZE}px; height: ${GRID_SIZE * TILE_SIZE}px;">
@@ -446,16 +507,6 @@
                   </div>
                 `;
               })}
-            </div>
-            
-            <!-- HUD -->
-            <div class="fixed top-6 right-6 flex gap-3">
-              <div class="bg-black/80 px-4 py-2 rounded-lg border border-white/10 text-[11px] font-bold uppercase tracking-widest">
-                Tool: <span class="text-red-500">${tool}</span>
-              </div>
-              <div class="bg-black/80 px-4 py-2 rounded-lg border border-white/10 text-[11px] font-bold uppercase tracking-widest">
-                FPS: 10
-              </div>
             </div>
           </div>
         </div>
