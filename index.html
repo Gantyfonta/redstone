@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Redstone Lab 2D</title>
+  <title>Redstone Lab 2D - Professional Edition</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧱</text></svg>">
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
@@ -33,21 +33,292 @@
       image-rendering: pixelated;
     }
   </style>
-  <script type="importmap">
+<script type="importmap">
 {
   "imports": {
     "react": "https://esm.sh/react@^19.2.3",
-    "react-dom": "https://esm.sh/react-dom@^19.2.3",
-    "react-dom/client": "https://esm.sh/react-dom@^19.2.3/client",
-    "@google/genai": "https://esm.sh/@google/genai@^1.35.0",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "react/": "https://esm.sh/react@^19.2.3/"
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.35.0"
   }
 }
 </script>
 </head>
 <body>
   <div id="root"></div>
-  <script type="module" src="index.tsx"></script>
+
+  <script type="module">
+    import { h, render } from 'https://esm.sh/preact';
+    import { useState, useEffect, useRef } from 'https://esm.sh/preact/hooks';
+    import htm from 'https://esm.sh/htm';
+    import { GoogleGenAI } from "https://esm.sh/@google/genai";
+
+    const html = htm.bind(h);
+
+    // --- Constants ---
+    const GRID_SIZE = 24;
+    const TILE_SIZE = 40;
+    const PUSH_LIMIT = 12;
+
+    const TileType = {
+      AIR: 'AIR', DUST: 'DUST', TORCH: 'TORCH', REPEATER: 'REPEATER',
+      LEVER: 'LEVER', BUTTON: 'BUTTON', LAMP: 'LAMP', BLOCK: 'BLOCK',
+      GLASS: 'GLASS', SLIME: 'SLIME', PISTON: 'PISTON', STICKY_PISTON: 'STICKY_PISTON',
+      PISTON_HEAD: 'PISTON_HEAD', OBSERVER: 'OBSERVER', NOTE_BLOCK: 'NOTE_BLOCK',
+      WATER: 'WATER', LAVA: 'LAVA', REDSTONE_BLOCK: 'REDSTONE_BLOCK',
+      COMPARATOR: 'COMPARATOR', TNT: 'TNT', TARGET: 'TARGET', OBSIDIAN: 'OBSIDIAN',
+      DAYLIGHT_SENSOR: 'DAYLIGHT_SENSOR', PRESSURE_PLATE: 'PRESSURE_PLATE',
+      COUNTER: 'COUNTER'
+    };
+
+    // --- Helper Functions ---
+    const getNeighbors = (x, y) => [
+      { x, y: y - 1, dir: 'N' }, { x, y: y + 1, dir: 'S' },
+      { x: x - 1, y, dir: 'W' }, { x: x + 1, y, dir: 'E' }
+    ];
+
+    const getDirectionVector = (dir) => {
+      return { N: { dx: 0, dy: -1 }, S: { dx: 0, dy: 1 }, W: { dx: -1, dy: 0 }, E: { dx: 1, dy: 0 } }[dir];
+    };
+
+    const getOpposite = (dir) => ({ N: 'S', S: 'N', E: 'W', W: 'E' }[dir]);
+
+    const isSolid = (type) => [
+      TileType.BLOCK, TileType.PISTON, TileType.PISTON_HEAD, TileType.STICKY_PISTON, 
+      TileType.GLASS, TileType.SLIME, TileType.LAMP, TileType.NOTE_BLOCK, 
+      TileType.OBSERVER, TileType.REDSTONE_BLOCK, TileType.TNT, TileType.TARGET,
+      TileType.OBSIDIAN, TileType.DAYLIGHT_SENSOR, TileType.COUNTER
+    ].includes(type);
+
+    // --- Engine ---
+    const updateRedstone = (grid, settings) => {
+      let nextGrid = {};
+      const keys = Object.keys(grid);
+
+      // Pass 1: Local Logic
+      keys.forEach(key => {
+        const tile = grid[key];
+        const [x, y] = key.split(',').map(Number);
+        let power = 0, active = tile.active, extra = {};
+
+        if (tile.type === TileType.REDSTONE_BLOCK) power = 15;
+        else if (tile.type === TileType.LEVER) power = tile.active ? 15 : 0;
+        else if (tile.type === TileType.BUTTON) power = tile.active ? 15 : 0;
+        else if (tile.type === TileType.COUNTER) {
+          const nextVal = ((tile.internalCounter || 0) % 15) + 1;
+          power = nextVal;
+          extra = { internalCounter: nextVal };
+        }
+        else if (tile.type === TileType.DAYLIGHT_SENSOR) {
+          const isDay = settings.dayTime < 1200;
+          const peak = isDay ? 600 : 1800;
+          const dist = Math.abs(settings.dayTime - peak);
+          const val = Math.max(0, 15 - Math.floor(dist / 40));
+          power = tile.isInverted ? (!isDay ? val : 0) : (isDay ? val : 0);
+          active = power > 0;
+        }
+        else if (tile.type === TileType.TORCH) {
+          const attachedDir = getOpposite(tile.direction);
+          const { dx, dy } = getDirectionVector(attachedDir);
+          const parent = grid[`${x + dx},${y + dy}`];
+          active = !(parent && parent.power > 0 && isSolid(parent.type));
+          power = active ? 15 : 0;
+        }
+        else if (tile.type === TileType.REPEATER) {
+          const bVec = getDirectionVector(getOpposite(tile.direction));
+          const input = grid[`${x + bVec.dx},${y + bVec.dy}`];
+          const inputOn = !!(input && input.power > 0);
+          let cd = tile.tickCooldown || 0, pend = tile.pendingActive ?? tile.active, state = tile.active;
+          if (inputOn !== pend) { pend = inputOn; cd = tile.delay || 1; }
+          if (cd > 0) { cd--; if (cd === 0) state = pend; }
+          active = state; power = active ? 15 : 0; extra = { tickCooldown: cd, pendingActive: pend };
+        }
+
+        nextGrid[key] = { ...tile, power, active, ...extra };
+      });
+
+      // Pass 2: Propagation
+      const powerMap = {};
+      const queue = [];
+      Object.keys(nextGrid).forEach(k => {
+        if (nextGrid[k].power > 0 && nextGrid[k].type !== TileType.DUST) {
+          powerMap[k] = nextGrid[k].power;
+          queue.push({ k, p: nextGrid[k].power });
+        }
+      });
+
+      let head = 0;
+      while (head < queue.length) {
+        const { k, p } = queue[head++];
+        const [x, y] = k.split(',').map(Number);
+        getNeighbors(x, y).forEach(n => {
+          const nk = `${n.x},${n.y}`;
+          if (nextGrid[nk]?.type === TileType.DUST) {
+            const np = Math.max(0, p - 1);
+            if (np > (powerMap[nk] || 0)) {
+              powerMap[nk] = np;
+              queue.push({ k: nk, p: np });
+            }
+          }
+        });
+      }
+
+      const finalGrid = { ...nextGrid };
+      Object.keys(finalGrid).forEach(k => {
+        if (finalGrid[k].type === TileType.DUST) finalGrid[k].power = powerMap[k] || 0;
+        if (finalGrid[k].type === TileType.LAMP) {
+          const [x, y] = k.split(',').map(Number);
+          finalGrid[k].active = getNeighbors(x, y).some(n => (powerMap[`${n.x},${n.y}`] || finalGrid[`${n.x},${n.y}`]?.power || 0) > 0);
+        }
+      });
+
+      return finalGrid;
+    };
+
+    // --- Sprite ---
+    const Sprite = ({ type, active, power = 0, direction = 'N', inverted, value }) => {
+      const rot = { N: 0, E: 90, S: 180, W: 270 }[direction] || 0;
+      const glow = active || power > 0 ? 'redstone-glow' : '';
+      const color = active || power > 0 ? '#ff4d4d' : '#4a0404';
+
+      switch (type) {
+        case TileType.DUST:
+          return html`<svg viewBox="0 0 40 40" class="w-full h-full ${glow}"><path d="M18 18h4v4h-4zM10 19h20v2H10zM19 10h2v20h-2z" fill="${color}" /></svg>`;
+        case TileType.TORCH:
+          return html`<svg viewBox="0 0 40 40" class="w-full h-full" style="transform: rotate(${rot}deg)"><rect x="18" y="20" width="4" height="12" fill="#5c4033" /><rect x="16" y="10" width="8" height="10" fill="${active ? '#ff4d4d' : '#3d0a0a'}" class="${active ? 'redstone-glow' : ''}" /></svg>`;
+        case TileType.REPEATER:
+          return html`<svg viewBox="0 0 40 40" class="w-full h-full" style="transform: rotate(${rot}deg)"><rect x="4" y="4" width="32" height="32" fill="#7a7a7a" rx="2" /><rect x="12" y="10" width="4" height="6" fill="${active ? '#ff4d4d' : '#3d0a0a'}" /><rect x="24" y="10" width="4" height="6" fill="${active ? '#ff4d4d' : '#3d0a0a'}" /><path d="M18 28l4-8 4 8h-8z" fill="#444" /></svg>`;
+        case TileType.LEVER:
+          return html`<svg viewBox="0 0 40 40" class="w-full h-full"><rect x="10" y="28" width="20" height="4" fill="#555" /><rect x="18" y="10" width="4" height="20" fill="#333" style="transform-origin: 20px 30px; transform: rotate(${active ? 45 : -45}deg)" /></svg>`;
+        case TileType.LAMP:
+          return html`<svg viewBox="0 0 40 40" class="w-full h-full"><rect x="4" y="4" width="32" height="32" fill="${active ? '#fff3ad' : '#2d2d2d'}" rx="2" /><rect x="8" y="8" width="24" height="24" fill="none" stroke="${active ? '#ffcc00' : '#444'}" stroke-width="2" /></svg>`;
+        case TileType.DAYLIGHT_SENSOR:
+          return html`<svg viewBox="0 0 40 40" class="w-full h-full"><rect x="4" y="4" width="32" height="32" fill="${inverted ? '#1e3a8a' : '#3b82f6'}" rx="2" /><rect x="12" y="12" width="16" height="16" fill="${inverted ? '#a5b4fc' : '#fde047'}" rx="8" /><text x="50%" y="85%" text-anchor="middle" fill="white" font-size="8" font-family="monospace">${inverted ? 'NIGHT' : 'DAY'}</text></svg>`;
+        case TileType.BLOCK:
+          return html`<div class="w-full h-full ${power > 0 ? 'bg-red-700' : 'bg-gray-600'} border border-gray-800 shadow-inner" />`;
+        case TileType.REDSTONE_BLOCK:
+          return html`<div class="w-full h-full bg-red-600 border-2 border-red-800 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)] redstone-glow" />`;
+        case TileType.COUNTER:
+          return html`<svg viewBox="0 0 40 40" class="w-full h-full"><rect x="4" y="4" width="32" height="32" fill="#1e293b" rx="4" /><text x="50%" y="26" text-anchor="middle" fill="${power > 0 ? '#ff4d4d' : '#444'}" font-size="20" font-weight="bold" class="${power > 0 ? 'redstone-glow' : ''}">${value || 0}</text></svg>`;
+        default:
+          return html`<div class="w-full h-full border border-white/5" />`;
+      }
+    };
+
+    // --- Main App ---
+    const App = () => {
+      const [grid, setGrid] = useState({});
+      const [selected, setSelected] = useState(TileType.DUST);
+      const [tool, setTool] = useState('BUILD');
+      const [dayTime, setDayTime] = useState(600);
+      const [isPaused, setIsPaused] = useState(false);
+      const [hovered, setHovered] = useState(null);
+      const [dragged, setDragged] = useState(null);
+      const [aiText, setAiText] = useState(null);
+
+      useEffect(() => {
+        if (isPaused) return;
+        const interval = setInterval(() => {
+          setDayTime(t => (t + 1) % 2400);
+          setGrid(g => updateRedstone(g, { dayTime: (dayTime + 1) % 2400 }));
+        }, 100);
+        return () => clearInterval(interval);
+      }, [isPaused, dayTime]);
+
+      const getSkyColor = () => {
+        const factor = Math.sin(Math.PI * dayTime / 1200);
+        return dayTime < 1200 ? `rgb(${5 + 30 * factor}, ${5 + 50 * factor}, ${10 + 100 * factor})` : `rgb(5, 5, 10)`;
+      };
+
+      const handleAnalyze = async () => {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const summary = Object.entries(grid).map(([k, t]) => `${t.type} at ${k}`).join(', ');
+        try {
+          const res = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
+            contents: `Briefly explain the logic of this redstone circuit: ${summary || 'Empty'}`
+          });
+          setAiText(res.text);
+        } catch (e) { setAiText("AI analysis failed."); }
+      };
+
+      return html`
+        <div class="flex h-screen w-screen overflow-hidden" style="background-color: ${getSkyColor()}">
+          <div class="w-80 bg-black/90 backdrop-blur-lg border-r border-white/10 flex flex-col p-6 z-20 shadow-2xl overflow-y-auto custom-scroll">
+            <h1 class="text-2xl font-bold mb-8 text-red-500 flex items-center gap-2">
+              <div class="w-3 h-3 bg-red-600 rounded-full animate-pulse shadow-[0_0_8px_red]" /> REDSTONE LAB
+            </h1>
+
+            <div class="space-y-6">
+              <section>
+                <div class="grid grid-cols-2 gap-2">
+                  ${['CURSOR', 'BUILD', 'DELETE', 'MOVE'].map(m => html`
+                    <button onclick=${() => setTool(m)} class="p-2 rounded font-bold text-[11px] uppercase border transition-all ${tool === m ? 'bg-red-600 border-red-400 text-white shadow-lg' : 'bg-white/5 border-white/10 text-slate-400'}">${m}</button>
+                  `)}
+                </div>
+              </section>
+
+              ${tool === 'BUILD' && html`
+                <section class="grid grid-cols-3 gap-2">
+                  ${Object.values(TileType).filter(v => v !== 'AIR' && v !== 'PISTON_HEAD').map(type => html`
+                    <button onclick=${() => setSelected(type)} class="p-2 rounded-lg border flex flex-col items-center gap-1 transition-all ${selected === type ? 'bg-red-950/40 border-red-500' : 'bg-white/5 border-transparent'}">
+                      <div class="w-8 h-8"><${Sprite} type=${type} active=${true} /></div>
+                      <span class="text-[9px] uppercase font-bold truncate w-full text-center opacity-70">${type.replace('_', ' ')}</span>
+                    </button>
+                  `)}
+                </section>
+              `}
+
+              <section class="bg-white/5 p-4 rounded-xl border border-white/10">
+                <div class="flex justify-between text-[10px] font-bold uppercase mb-2">
+                  <span>${dayTime < 1200 ? '☀️ Day' : '🌙 Night'}</span>
+                  <span>${Math.floor(dayTime / 100)}:00</span>
+                </div>
+                <div class="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                  <div class="h-full bg-red-500" style="width: ${(dayTime / 2400) * 100}%" />
+                </div>
+              </section>
+
+              <button onclick=${() => setIsPaused(!isPaused)} class="w-full py-2 bg-white/5 border border-white/10 rounded font-bold text-xs uppercase">${isPaused ? '▶ Resume' : '⏸ Pause'}</button>
+              <button onclick=${handleAnalyze} class="w-full py-2 bg-indigo-600 rounded font-bold text-xs uppercase">AI Logic Scan</button>
+              ${aiText && html`<div class="text-[10px] p-2 bg-indigo-900/20 border border-indigo-500/30 rounded italic">"${aiText}"</div>`}
+            </div>
+          </div>
+
+          <div class="flex-1 relative flex items-center justify-center p-20 overflow-auto">
+            <div class="grid-bg shadow-2xl relative" style="display: grid; grid-template-columns: repeat(${GRID_SIZE}, ${TILE_SIZE}px); width: ${GRID_SIZE * TILE_SIZE}px; height: ${GRID_SIZE * TILE_SIZE}px">
+              ${Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, i) => {
+                const x = i % GRID_SIZE, y = Math.floor(i / GRID_SIZE), k = `${x},${y}`, t = grid[k];
+                return html`
+                  <div key=${k} 
+                    onmousedown=${() => {
+                      if (tool === 'BUILD') setGrid({ ...grid, [k]: { type: selected, power: 0, direction: 'N', active: selected === TileType.TORCH, internalCounter: 0, isInverted: false } });
+                      else if (tool === 'DELETE') { const n = { ...grid }; delete n[k]; setGrid(n); }
+                      else if (tool === 'CURSOR' && t?.type === TileType.LEVER) setGrid({ ...grid, [k]: { ...t, active: !t.active } });
+                      else if (tool === 'CURSOR' && t?.type === TileType.DAYLIGHT_SENSOR) setGrid({ ...grid, [k]: { ...t, isInverted: !t.isInverted } });
+                      else if (tool === 'MOVE' && t) setDragged(k);
+                    }}
+                    onmouseenter=${() => setHovered(k)}
+                    onmouseup=${() => {
+                      if (tool === 'MOVE' && dragged && dragged !== k) { const n = { ...grid }; n[k] = n[dragged]; delete n[dragged]; setGrid(n); }
+                      setDragged(null);
+                    }}
+                    oncontextmenu=${(e) => {
+                      e.preventDefault();
+                      if (t) { const d = { N: 'E', E: 'S', S: 'W', W: 'N' }[t.direction]; setGrid({ ...grid, [k]: { ...t, direction: d } }); }
+                    }}
+                    class="border border-white/5 flex items-center justify-center relative ${dragged === k ? 'opacity-20' : ''}" style="width: ${TILE_SIZE}px; height: ${TILE_SIZE}px">
+                    ${t && html`<${Sprite} type=${t.type} active=${t.active} power=${t.power} direction=${t.direction} inverted=${t.isInverted} value=${t.internalCounter} />`}
+                  </div>
+                `;
+              })}
+            </div>
+          </div>
+        </div>
+      `;
+    };
+
+    render(html`<${App} />`, document.getElementById('root'));
+  </script>
 </body>
 </html>
