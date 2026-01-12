@@ -30,6 +30,9 @@
     .tile-active-shadow {
       box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
     }
+    .cursor-cell { cursor: cell; }
+    .cursor-grab { cursor: grab; }
+    .cursor-grabbing { cursor: grabbing; }
   </style>
 <script type="importmap">
 {
@@ -155,10 +158,6 @@
     ].includes(type);
 
     const isImmovable = (type) => [TileType.OBSIDIAN, TileType.PISTON_HEAD, TileType.AIR].includes(type);
-    const isReplaceable = (type) => [
-      TileType.AIR, TileType.DUST, TileType.TORCH, TileType.LEVER, TileType.BUTTON, 
-      TileType.REPEATER, TileType.COMPARATOR, TileType.PRESSURE_PLATE
-    ].includes(type);
 
     const getConnectedGroup = (grid, startX, startY, excludeX, excludeY) => {
       const startKey = `${startX},${startY}`;
@@ -349,7 +348,6 @@
         }
       });
 
-      // Simple Piston movements (Pass 4)
       Object.keys(nextGrid).forEach(key => {
         const tile = nextGrid[key];
         if (tile.type !== TileType.PISTON && tile.type !== TileType.STICKY_PISTON) return;
@@ -396,6 +394,7 @@
       const [isMouseDown, setIsMouseDown] = useState(false);
       const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
       const [showSettings, setShowSettings] = useState(false);
+      const [draggedKey, setDraggedKey] = useState(null);
       const lastNoteRef = useRef({});
 
       const playClick = (isOn) => {
@@ -450,9 +449,24 @@
 
       useEffect(() => {
         const hMove = (e) => setMousePos({ x: e.clientX, y: e.clientY });
-        const hUp = () => setIsMouseDown(false);
-        window.addEventListener('mousemove', hMove); window.addEventListener('mouseup', hUp);
-        return () => { window.removeEventListener('mousemove', hMove); window.removeEventListener('mouseup', hUp); };
+        const hUp = () => {
+          setIsMouseDown(false);
+          setDraggedKey(null);
+        };
+        const hKey = (e) => {
+          if (e.key === '1') setTool('CURSOR');
+          if (e.key === '2') setTool('BUILD');
+          if (e.key === '3') setTool('DELETE');
+          if (e.key === '4') setTool('MOVE');
+        };
+        window.addEventListener('mousemove', hMove);
+        window.addEventListener('mouseup', hUp);
+        window.addEventListener('keydown', hKey);
+        return () => {
+          window.removeEventListener('mousemove', hMove);
+          window.removeEventListener('mouseup', hUp);
+          window.removeEventListener('keydown', hKey);
+        };
       }, []);
 
       const place = (x, y) => {
@@ -480,6 +494,24 @@
         if (tool === 'BUILD' && e.button === 0) place(x, y);
         else if (tool === 'DELETE' && e.button === 0) del(x, y);
         else if (tool === 'CURSOR' && e.button === 0) interact(x, y);
+        else if (tool === 'MOVE' && e.button === 0 && grid[`${x},${y}`]) setDraggedKey(`${x},${y}`);
+      };
+
+      const hMU = (x, y) => {
+        if (tool === 'MOVE' && draggedKey) {
+          const targetKey = `${x},${y}`;
+          if (draggedKey !== targetKey) {
+            setGrid(prev => {
+              const next = { ...prev };
+              const tile = { ...next[draggedKey] };
+              delete next[draggedKey];
+              next[targetKey] = tile;
+              return next;
+            });
+            playClick(true);
+          }
+        }
+        setDraggedKey(null);
       };
 
       const hME = (x, y) => {
@@ -520,10 +552,16 @@
             
             <div class="space-y-6">
               <section>
-                <h3 class="text-xs uppercase font-bold text-slate-500 mb-3">Tools</h3>
+                <div class="flex justify-between items-center mb-3">
+                  <h3 class="text-xs uppercase font-bold text-slate-500">Tools</h3>
+                  <span class="text-[9px] text-slate-600">[Keys 1-4]</span>
+                </div>
                 <div class="grid grid-cols-2 gap-2">
-                  ${['CURSOR', 'BUILD', 'DELETE'].map(m => html`
-                    <button onclick=${() => setTool(m)} class=${`p-2 rounded font-bold text-[10px] uppercase border-2 ${tool === m ? 'bg-red-600 border-red-400' : 'bg-slate-800 border-slate-700'}`}>${m}</button>
+                  ${['CURSOR', 'BUILD', 'DELETE', 'MOVE'].map((m, idx) => html`
+                    <button onclick=${() => setTool(m)} class=${`p-2 rounded font-bold text-[10px] uppercase border-2 relative transition-all ${tool === m ? 'bg-red-600 border-red-400' : 'bg-slate-800 border-slate-700 hover:border-slate-500'}`}>
+                      ${m}
+                      <span class="absolute top-0 right-1 opacity-40 text-[8px]">${idx + 1}</span>
+                    </button>
                   `)}
                 </div>
               </section>
@@ -544,14 +582,14 @@
 
               <section>
                 <h3 class="text-xs uppercase font-bold text-slate-500 mb-2">Sim: ${isPaused ? 'PAUSED' : 'RUNNING'}</h3>
-                <button onclick=${() => setIsPaused(!isPaused)} class="w-full py-2 rounded bg-amber-700 font-bold text-xs uppercase">${isPaused ? 'Resume' : 'Pause'}</button>
+                <button onclick=${() => setIsPaused(!isPaused)} class="w-full py-2 rounded bg-amber-700 hover:bg-amber-600 font-bold text-xs uppercase transition-colors">${isPaused ? 'Resume' : 'Pause'}</button>
               </section>
 
               <section class="border-t border-slate-800 pt-4">
                 <h3 class="text-xs uppercase font-bold text-slate-500 mb-2">Blueprints</h3>
                 <div class="flex gap-2">
-                  <button onclick=${() => { const data = btoa(JSON.stringify(grid)); prompt('Copy blueprint:', data); }} class="flex-1 py-1 bg-slate-800 rounded text-[10px] font-bold">EXPORT</button>
-                  <button onclick=${() => { const d = prompt('Paste blueprint:'); if(d) setGrid(JSON.parse(atob(d))); }} class="flex-1 py-1 bg-slate-800 rounded text-[10px] font-bold">IMPORT</button>
+                  <button onclick=${() => { const data = btoa(JSON.stringify(grid)); prompt('Copy blueprint:', data); }} class="flex-1 py-1 bg-slate-800 hover:bg-slate-700 rounded text-[10px] font-bold">EXPORT</button>
+                  <button onclick=${() => { const d = prompt('Paste blueprint:'); if(d) setGrid(JSON.parse(atob(d))); }} class="flex-1 py-1 bg-slate-800 hover:bg-slate-700 rounded text-[10px] font-bold">IMPORT</button>
                 </div>
               </section>
             </div>
@@ -562,6 +600,8 @@
               ${Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, i) => {
                 const x = i % GRID_SIZE, y = Math.floor(i / GRID_SIZE), k = `${x},${y}`, t = grid[k];
                 let bg = 'transparent', content = null;
+                const isBeingDragged = draggedKey === k;
+
                 if (t) {
                   const rot = { N: 'rotate-0', E: 'rotate-90', S: 'rotate-180', W: '-rotate-90' }[t.direction];
                   if (t.type === TileType.DUST) bg = t.power > 0 ? COLORS.REDSTONE_ON : COLORS.REDSTONE_OFF;
@@ -573,12 +613,21 @@
                   else if (t.type === TileType.LEVER) content = html`<div class="relative w-full h-full flex items-center justify-center"><div class="w-6 h-2 bg-stone-500 absolute" /><div class="w-1 h-6 bg-stone-800 ${t.active ? 'rotate-45' : '-rotate-45'}" /></div>`;
                   else content = html`<div class="${rot}">${ICONS[t.type]}</div>`;
                 }
+
+                const cursorClass = tool === 'BUILD' ? 'cursor-cell' : tool === 'MOVE' ? (t ? 'cursor-grab' : 'cursor-default') : 'cursor-default';
+
                 return html`
-                  <div key=${k} onmousedown=${(e) => hMD(e, x, y)} onmouseenter=${() => hME(x, y)} onmouseleave=${() => hML(x, y)} oncontextmenu=${(e) => hRC(e, x, y)}
-                    class="border border-[#242424] flex items-center justify-center relative select-none cursor-crosshair"
+                  <div key=${k} 
+                    onmousedown=${(e) => hMD(e, x, y)} 
+                    onmouseenter=${() => hME(x, y)} 
+                    onmouseleave=${() => hML(x, y)} 
+                    onmouseup=${() => hMU(x, y)}
+                    oncontextmenu=${(e) => hRC(e, x, y)}
+                    class="border border-[#242424] flex items-center justify-center relative select-none ${cursorClass} ${isBeingDragged ? 'opacity-30' : ''}"
                     style=${{ width: TILE_SIZE, height: TILE_SIZE, backgroundColor: bg }}>
                     ${content}
                     ${t?.power > 0 && t.type === TileType.DUST && html`<span class="absolute bottom-0 right-0 text-[8px] text-white/50">${t.power}</span>`}
+                    ${hoveredTile === k && tool === 'MOVE' && draggedKey && html`<div class="absolute inset-0 border-2 border-indigo-400 animate-pulse pointer-events-none" />`}
                   </div>
                 `;
               })}
