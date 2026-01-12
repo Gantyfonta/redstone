@@ -27,13 +27,16 @@
     input[type=range] {
       accent-color: #ef4444;
     }
+    .tile-active-shadow {
+      box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+    }
   </style>
 <script type="importmap">
 {
   "imports": {
-    "react/": "https://esm.sh/react@^19.2.3/",
     "react": "https://esm.sh/react@^19.2.3",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
     "@google/genai": "https://esm.sh/@google/genai@^1.35.0"
   }
 }
@@ -43,11 +46,11 @@
   <div id="root"></div>
 
   <script type="module">
-    import { h, render, useState, useEffect, useRef } from 'https://esm.sh/preact';
-    import { h as html } from 'https://esm.sh/preact/hooks';
+    import { h, render } from 'https://esm.sh/preact';
+    import { useState, useEffect, useRef } from 'https://esm.sh/preact/hooks';
     import htm from 'https://esm.sh/htm';
 
-    const htag = htm.bind(h);
+    const html = htm.bind(h);
 
     // --- Constants & Types ---
     const GRID_SIZE = 24;
@@ -76,34 +79,44 @@
     };
 
     const ICONS = {
-      AIR: htag`<div class="w-4 h-4 border border-dashed border-gray-600 rounded" />`,
-      DUST: htag`<div class="w-4 h-4 bg-red-700 rounded-full" />`,
-      TORCH: htag`<div class="w-2 h-4 bg-red-500 rounded-t-sm" />`,
-      REPEATER: htag`<div class="w-4 h-4 bg-gray-500 flex items-center justify-center text-[8px]">▶</div>`,
-      LEVER: htag`<div class="w-2 h-4 bg-stone-400 rotate-12" />`,
-      BUTTON: htag`<div class="w-2 h-2 bg-stone-600" />`,
-      LAMP: htag`<div class="w-4 h-4 bg-yellow-900 border border-yellow-700" />`,
-      BLOCK: htag`<div class="w-4 h-4 bg-gray-400 shadow-inner" />`,
-      GLASS: htag`<div class="w-4 h-4 border border-cyan-200/50 bg-cyan-100/10" />`,
-      SLIME: htag`<div class="w-4 h-4 bg-green-400 border border-green-600 shadow-sm" />`,
-      PISTON: htag`<div class="w-4 h-4 bg-stone-700 border-t-4 border-amber-900" />`,
-      STICKY_PISTON: htag`<div class="w-4 h-4 bg-stone-700 border-t-4 border-green-600" />`,
-      PISTON_HEAD: htag`<div class="w-4 h-1 bg-amber-800" />`,
-      OBSERVER: htag`<div class="w-4 h-4 bg-stone-800 flex flex-col items-center justify-center border-t border-red-500"><div class="w-2 h-2 bg-stone-400 rounded-sm" /></div>`,
-      NOTE_BLOCK: htag`<div class="w-4 h-4 bg-amber-950 border border-amber-700 flex items-center justify-center text-[8px] text-amber-500 font-bold">♫</div>`,
-      WATER: htag`<div class="w-4 h-4 bg-blue-500 rounded-sm shadow-[0_0_5px_rgba(59,130,246,0.5)]" />`,
-      LAVA: htag`<div class="w-4 h-4 bg-orange-600 rounded-sm shadow-[0_0_8px_rgba(234,88,12,0.8)]" />`,
-      REDSTONE_BLOCK: htag`<div class="w-4 h-4 bg-red-600 border border-red-900 shadow-[inset_0_0_5px_rgba(0,0,0,0.5)]" />`,
-      COMPARATOR: htag`<div class="w-4 h-4 bg-stone-400 flex items-center justify-center text-[8px] font-bold">C</div>`,
-      TNT: htag`<div class="w-4 h-4 bg-red-600 border border-white flex flex-col items-center justify-center text-[6px] font-black text-white">TNT</div>`,
-      TARGET: htag`<div class="w-4 h-4 bg-white rounded-full border-2 border-red-600 flex items-center justify-center"><div class="w-1 h-1 bg-red-600 rounded-full" /></div>`,
-      OBSIDIAN: htag`<div class="w-4 h-4 bg-[#1a0d2b] border border-[#2d1b4d] shadow-[inset_0_0_3px_rgba(255,255,255,0.1)]" />`,
-      DISPENSER: htag`<div class="w-4 h-4 bg-stone-600 border border-stone-800 flex items-center justify-center"><div class="w-2 h-2 bg-stone-900 rounded-full border border-stone-400" /></div>`,
-      DAYLIGHT_SENSOR: htag`<div class="w-4 h-4 bg-blue-400 border-2 border-slate-600 flex items-center justify-center"><div class="w-2 h-2 bg-yellow-300 rounded-full" /></div>`,
-      PRESSURE_PLATE: htag`<div class="w-4 h-2 bg-stone-400 border border-stone-600 rounded-sm" />`,
-      SCULK_SENSOR: htag`<div class="w-4 h-4 bg-teal-900 border border-teal-500 flex items-center justify-center"><div class="w-1 h-3 bg-teal-400 animate-pulse" /></div>`,
-      ANTENNA: htag`<div class="w-4 h-4 text-indigo-400">📡</div>`,
-      RECEIVER: htag`<div class="w-4 h-4 text-pink-400">📟</div>`,
+      AIR: html`<div class="w-4 h-4 border border-dashed border-gray-600 rounded" />`,
+      DUST: html`<div class="w-4 h-4 bg-red-700 rounded-full" />`,
+      TORCH: html`<div class="w-2 h-4 bg-red-500 rounded-t-sm" />`,
+      REPEATER: html`<div class="w-4 h-4 bg-gray-500 flex items-center justify-center text-[8px]">▶</div>`,
+      LEVER: html`<div class="w-2 h-4 bg-stone-400 rotate-12" />`,
+      BUTTON: html`<div class="w-2 h-2 bg-stone-600" />`,
+      LAMP: html`<div class="w-4 h-4 bg-yellow-900 border border-yellow-700" />`,
+      BLOCK: html`<div class="w-4 h-4 bg-gray-400 shadow-inner" />`,
+      GLASS: html`<div class="w-4 h-4 border border-cyan-200/50 bg-cyan-100/10" />`,
+      SLIME: html`<div class="w-4 h-4 bg-green-400 border border-green-600 shadow-sm" />`,
+      PISTON: html`<div class="w-4 h-4 bg-stone-700 border-t-4 border-amber-900" />`,
+      STICKY_PISTON: html`<div class="w-4 h-4 bg-stone-700 border-t-4 border-green-600" />`,
+      PISTON_HEAD: html`<div class="w-4 h-1 bg-amber-800" />`,
+      OBSERVER: html`<div class="w-4 h-4 bg-stone-800 flex flex-col items-center justify-center border-t border-red-500"><div class="w-2 h-2 bg-stone-400 rounded-sm" /></div>`,
+      NOTE_BLOCK: html`<div class="w-4 h-4 bg-amber-950 border border-amber-700 flex items-center justify-center text-[8px] text-amber-500 font-bold">♫</div>`,
+      WATER: html`<div class="w-4 h-4 bg-blue-500 rounded-sm shadow-[0_0_5px_rgba(59,130,246,0.5)]" />`,
+      LAVA: html`<div class="w-4 h-4 bg-orange-600 rounded-sm shadow-[0_0_8px_rgba(234,88,12,0.8)]" />`,
+      REDSTONE_BLOCK: html`<div class="w-4 h-4 bg-red-600 border border-red-900 shadow-[inset_0_0_5px_rgba(0,0,0,0.5)]" />`,
+      COMPARATOR: html`<div class="w-4 h-4 bg-stone-400 flex items-center justify-center text-[8px] font-bold">C</div>`,
+      TNT: html`<div class="w-4 h-4 bg-red-600 border border-white flex flex-col items-center justify-center text-[6px] font-black text-white">TNT</div>`,
+      TARGET: html`<div class="w-4 h-4 bg-white rounded-full border-2 border-red-600 flex items-center justify-center"><div class="w-1 h-1 bg-red-600 rounded-full" /></div>`,
+      OBSIDIAN: html`<div class="w-4 h-4 bg-[#1a0d2b] border border-[#2d1b4d] shadow-[inset_0_0_3px_rgba(255,255,255,0.1)]" />`,
+      DISPENSER: html`<div class="w-4 h-4 bg-stone-600 border border-stone-800 flex items-center justify-center"><div class="w-2 h-2 bg-stone-900 rounded-full border border-stone-400" /></div>`,
+      DAYLIGHT_SENSOR: html`<div class="w-4 h-4 bg-blue-400 border-2 border-slate-600 flex items-center justify-center"><div class="w-2 h-2 bg-yellow-300 rounded-full" /></div>`,
+      PRESSURE_PLATE: html`<div class="w-4 h-2 bg-stone-400 border border-stone-600 rounded-sm" />`,
+      SCULK_SENSOR: html`<div class="w-4 h-4 bg-teal-900 border border-teal-500 flex items-center justify-center"><div class="w-1 h-3 bg-teal-400 animate-pulse" /></div>`,
+      ANTENNA: html`<div class="w-4 h-4 text-indigo-400">📡</div>`,
+      RECEIVER: html`<div class="w-4 h-4 text-pink-400">📟</div>`,
+    };
+
+    // --- Audio Singleton ---
+    let _audioCtx = null;
+    const getAudioCtx = () => {
+      if (!_audioCtx) {
+        _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (_audioCtx.state === 'suspended') _audioCtx.resume();
+      return _audioCtx;
     };
 
     // --- Redstone Engine Logic ---
@@ -386,11 +399,35 @@
       const lastNoteRef = useRef({});
 
       const playClick = (isOn) => {
-        try { const ctx = new AudioContext(); const osc = ctx.createOscillator(); const gain = ctx.createGain(); osc.type = 'sine'; osc.frequency.setValueAtTime(isOn ? 1200 : 800, ctx.currentTime); gain.gain.setValueAtTime(0.05, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.05); osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.1); } catch(e) {}
+        try {
+          const ctx = getAudioCtx();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(isOn ? 1200 : 800, ctx.currentTime);
+          gain.gain.setValueAtTime(0.05, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.05);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.1);
+        } catch(e) {}
       };
 
       const playNote = (p) => {
-        try { const ctx = new AudioContext(); const osc = ctx.createOscillator(); const gain = ctx.createGain(); osc.type = 'triangle'; osc.frequency.setValueAtTime(185 * Math.pow(2, p / 12), ctx.currentTime); gain.gain.setValueAtTime(0.1, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4); osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.5); } catch(e) {}
+        try {
+          const ctx = getAudioCtx();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(185 * Math.pow(2, p / 12), ctx.currentTime);
+          gain.gain.setValueAtTime(0.1, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.4);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.5);
+        } catch(e) {}
       };
 
       useEffect(() => {
@@ -473,7 +510,7 @@
         } else setDirection(seq[(seq.indexOf(direction) + 1) % 4]);
       };
 
-      return htag`
+      return html`
         <div class="flex h-screen w-screen overflow-hidden text-slate-200" style=${{ backgroundColor: settings.backgroundColor }}>
           <div class="w-80 bg-[#1a1a1a] border-r border-slate-800 flex flex-col p-4 z-20 shadow-2xl overflow-y-auto custom-scroll">
             <h1 class="text-2xl font-bold mb-6 text-red-500 flex items-center justify-between">
@@ -485,17 +522,17 @@
               <section>
                 <h3 class="text-xs uppercase font-bold text-slate-500 mb-3">Tools</h3>
                 <div class="grid grid-cols-2 gap-2">
-                  ${['CURSOR', 'BUILD', 'DELETE'].map(m => htag`
+                  ${['CURSOR', 'BUILD', 'DELETE'].map(m => html`
                     <button onclick=${() => setTool(m)} class=${`p-2 rounded font-bold text-[10px] uppercase border-2 ${tool === m ? 'bg-red-600 border-red-400' : 'bg-slate-800 border-slate-700'}`}>${m}</button>
                   `)}
                 </div>
               </section>
 
-              ${tool === 'BUILD' && htag`
+              ${tool === 'BUILD' && html`
                 <section>
                   <h3 class="text-xs uppercase font-bold text-slate-500 mb-3">Components</h3>
                   <div class="grid grid-cols-3 gap-2">
-                    ${Object.keys(TileType).filter(k => k !== 'AIR' && k !== 'PISTON_HEAD').map(k => htag`
+                    ${Object.keys(TileType).filter(k => k !== 'AIR' && k !== 'PISTON_HEAD').map(k => html`
                       <button onclick=${() => setSelectedType(TileType[k])} class=${`p-1.5 rounded-lg border-2 flex flex-col items-center gap-1 ${selectedType === TileType[k] ? 'bg-red-950 border-red-600' : 'bg-[#242424] border-transparent'}`}>
                         <div class="text-base">${ICONS[TileType[k]]}</div>
                         <div class="text-[8px] uppercase font-bold text-center leading-none mt-1">${k.replace('_', ' ')}</div>
@@ -531,23 +568,23 @@
                   else if (t.type === TileType.BLOCK) bg = t.power > 0 ? '#b91c1c' : COLORS.BLOCK;
                   else if (t.type === TileType.LAMP) bg = t.active ? COLORS.LAMP_ON : COLORS.LAMP_OFF;
                   else if (t.type === TileType.TNT) bg = t.active ? (Math.floor(Date.now()/100)%2===0?'#fff':'#ef4444') : COLORS.TNT;
-                  else if (t.type === TileType.PISTON || t.type === TileType.STICKY_PISTON) content = htag`<div class="w-full h-full flex flex-col items-center bg-stone-600 ${rot}"><div class="w-full h-3 ${t.type === TileType.STICKY_PISTON ? 'bg-green-600' : 'bg-amber-900'}" /></div>`;
-                  else if (t.type === TileType.TORCH) content = htag`<div class="${rot} ${t.active ? '' : 'opacity-40'} flex flex-col items-center"><div class="w-2 h-4 ${t.active ? 'bg-red-500 shadow-[0_0_10px_red]' : 'bg-red-950'}" /><div class="w-1 h-3 bg-amber-900" /></div>`;
-                  else if (t.type === TileType.LEVER) content = htag`<div class="relative w-full h-full flex items-center justify-center"><div class="w-6 h-2 bg-stone-500 absolute" /><div class="w-1 h-6 bg-stone-800 ${t.active ? 'rotate-45' : '-rotate-45'}" /></div>`;
-                  else content = htag`<div class="${rot}">${ICONS[t.type]}</div>`;
+                  else if (t.type === TileType.PISTON || t.type === TileType.STICKY_PISTON) content = html`<div class="w-full h-full flex flex-col items-center bg-stone-600 ${rot}"><div class="w-full h-3 ${t.type === TileType.STICKY_PISTON ? 'bg-green-600' : 'bg-amber-900'}" /></div>`;
+                  else if (t.type === TileType.TORCH) content = html`<div class="${rot} ${t.active ? '' : 'opacity-40'} flex flex-col items-center"><div class="w-2 h-4 ${t.active ? 'bg-red-500 shadow-[0_0_10px_red]' : 'bg-red-950'}" /><div class="w-1 h-3 bg-amber-900" /></div>`;
+                  else if (t.type === TileType.LEVER) content = html`<div class="relative w-full h-full flex items-center justify-center"><div class="w-6 h-2 bg-stone-500 absolute" /><div class="w-1 h-6 bg-stone-800 ${t.active ? 'rotate-45' : '-rotate-45'}" /></div>`;
+                  else content = html`<div class="${rot}">${ICONS[t.type]}</div>`;
                 }
-                return htag`
+                return html`
                   <div key=${k} onmousedown=${(e) => hMD(e, x, y)} onmouseenter=${() => hME(x, y)} onmouseleave=${() => hML(x, y)} oncontextmenu=${(e) => hRC(e, x, y)}
                     class="border border-[#242424] flex items-center justify-center relative select-none cursor-crosshair"
                     style=${{ width: TILE_SIZE, height: TILE_SIZE, backgroundColor: bg }}>
                     ${content}
-                    ${t?.power > 0 && t.type === TileType.DUST && htag`<span class="absolute bottom-0 right-0 text-[8px] text-white/50">${t.power}</span>`}
+                    ${t?.power > 0 && t.type === TileType.DUST && html`<span class="absolute bottom-0 right-0 text-[8px] text-white/50">${t.power}</span>`}
                   </div>
                 `;
               })}
             </div>
             
-            ${showSettings && htag`
+            ${showSettings && html`
               <div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
                 <div class="bg-[#1a1a1a] p-6 border-2 border-slate-700 w-80 rounded-xl">
                   <h2 class="text-xl mb-4 font-bold text-red-500">Settings</h2>
@@ -567,7 +604,7 @@
       `;
     };
 
-    render(htag`<${App} />`, document.getElementById('root'));
+    render(html`<${App} />`, document.getElementById('root'));
   </script>
 </body>
 </html>
